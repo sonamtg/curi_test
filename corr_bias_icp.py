@@ -129,6 +129,9 @@ plt.ylim(icp_before.bounds.bottom, icp_before.bounds.top)
 plt.title("With glacier outlines")
 plt.show()
 
+# saving the nuth and kaab dem
+cor_after.save("nuth&kaab.tif")
+
 # saving the final coregistered dem
 
 pipe_after.save("coregistered.tif")
