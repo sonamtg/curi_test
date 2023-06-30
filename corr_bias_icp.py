@@ -128,3 +128,7 @@ plt.xlim(icp_before.bounds.left, icp_before.bounds.right)
 plt.ylim(icp_before.bounds.bottom, icp_before.bounds.top)
 plt.title("With glacier outlines")
 plt.show()
+
+# saving the final coregistered dem
+
+pipe_after.save("coregistered.tif")
