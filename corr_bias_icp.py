@@ -20,7 +20,7 @@ inlier_mask = ~outlines_2015.create_mask(reference_dem)
 # bias corr
 
 bias_corr = coreg.BiasCorr()
-bias_corr.fit(reference_dem, dem_to_be_aligned, inlier_mask=inlier_mask)
+bias_corr.fit(reference_dem, dem_to_be_aligned, inlier_mask=inlier_mask, verbose=True)
 
 corrected_dem = bias_corr.apply(dem_to_be_aligned)
 
@@ -29,33 +29,40 @@ corrected_dem = bias_corr.apply(dem_to_be_aligned)
 # nuth and kaab cor 
 
 nuth_kaab = xdem.coreg.NuthKaab()
-nuth_kaab.fit(reference_dem, corrected_dem, inlier_mask=inlier_mask, verbose= True)
-dem_coreg = nuth_kaab.apply(corrected_dem)
+nuth_kaab.fit(reference_dem, dem_to_be_aligned, inlier_mask=inlier_mask, verbose= True)
+dem_coreg = nuth_kaab.apply(dem_to_be_aligned)
 
-cor_before = reference_dem - corrected_dem
+cor_before = reference_dem - dem_to_be_aligned
 cor_after = reference_dem - dem_coreg
-
 
 
 cor_after.show(cmap="coolwarm_r", vmin=-20, vmax=20, cbar_title="Elevation change (m)")
 cor_before.show(cmap="coolwarm_r", vmin=-10, vmax=10, cbar_title="Elevation change (m)")
 
+# compare median and nmad 
 
+
+inliers_before = cor_before[inlier_mask]
+med_before, nmad_before = np.median(inliers_before), xdem.spatialstats.nmad(inliers_before)
+
+inliers_after = cor_after[inlier_mask]
+med_after, nmad_after = np.median(inliers_after), xdem.spatialstats.nmad(inliers_after)
+
+print(f"Error before: median = {med_before:.2f} - NMAD = {nmad_before:.2f} m")
+print(f"Error after: median = {med_after:.2f} - NMAD = {nmad_after:.2f} m")
+
+# plot 
 
 ax = plt.subplot(111)
 cor_after.show(ax=ax, cmap="coolwarm_r", vmin=-20, vmax=20, cbar_title="Elevation change (m)")
-outlines_2015.ds.plot(ax=ax, fc="none", ec="k")
-plt.xlim(cor_after.bounds.left, cor_after.bounds.right)
-plt.ylim(cor_after.bounds.bottom, cor_after.bounds.top)
+inlier_mask.ds.plot(ax=ax, fc="none", ec="k")
 plt.title("With glacier outlines")
 plt.show()
 
 
 ax = plt.subplot(111)
-cor_after.show(ax=ax, cmap="coolwarm_r", vmin=-20, vmax=20, cbar_title="Elevation change (m)")
-outlines_2015.ds.plot(ax=ax, fc="none", ec="k")
-plt.xlim(cor_before.bounds.left, cor_before.bounds.right)
-plt.ylim(cor_before.bounds.bottom, cor_before.bounds.top)
+cor_before.show(ax=ax, cmap="coolwarm_r", vmin=-20, vmax=20, cbar_title="Elevation change (m)")
+inlier_mask.ds.plot(ax=ax, fc="none", ec="k")
 plt.title("With glacier outlines")
 plt.show()
 
@@ -64,10 +71,10 @@ plt.show()
 # icp cor 
 
 icp = xdem.coreg.ICP()
-icp.fit(reference_dem, corrected_dem, inlier_mask=inlier_mask)
-dem_icp= icp.apply(corrected_dem)
+icp.fit(reference_dem, dem_to_be_aligned, inlier_mask=inlier_mask, verbose= True)
+dem_icp= icp.apply(dem_to_be_aligned)
 
-icp_before = reference_dem - corrected_dem
+icp_before = reference_dem - dem_to_be_aligned
 icp_after = reference_dem - dem_icp
 
 
@@ -75,11 +82,26 @@ icp_after.show(cmap="coolwarm_r", vmin=-20, vmax=20, cbar_title="Elevation chang
 icp_before.show(cmap="coolwarm_r", vmin=-10, vmax=10, cbar_title="Elevation change (m)")
 
 
+
+# compare median and nmad 
+
+
+inliers_icp_before = icp_before[inlier_mask]
+med_icp_before, nmad_icp_before = np.median(inliers_icp_before), xdem.spatialstats.nmad(inliers_icp_before)
+
+inliers_icp_after = icp_after[inlier_mask]
+med_icp_after, nmad_icp_after = np.median(inliers_icp_after), xdem.spatialstats.nmad(inliers_icp_after)
+
+print(f"Error before: median = {med_icp_before:.2f} - NMAD = {nmad_icp_before:.2f} m")
+print(f"Error after: median = {med_icp_after:.2f} - NMAD = {nmad_icp_after:.2f} m")
+
+
+
+# plot
+
 ax = plt.subplot(111)
 icp_before.show(ax=ax, cmap="coolwarm_r", vmin=-20, vmax=20, cbar_title="Elevation change (m)")
-outlines_2015.ds.plot(ax=ax, fc="none", ec="k")
-plt.xlim(icp_before.bounds.left, icp_before.bounds.right)
-plt.ylim(icp_before.bounds.bottom, icp_before.bounds.top)
+inlier_mask.ds.plot(ax=ax, fc="none", ec="k")
 plt.title("With glacier outlines")
 plt.show()
 
@@ -87,9 +109,7 @@ plt.show()
 
 ax = plt.subplot(111)
 icp_after.show(ax=ax, cmap="coolwarm_r", vmin=-20, vmax=20, cbar_title="Elevation change (m)")
-outlines_2015.ds.plot(ax=ax, fc="none", ec="k")
-plt.xlim(icp_after.bounds.left, icp_after.bounds.right)
-plt.ylim(icp_after.bounds.bottom, icp_after.bounds.top)
+inlier_mask.ds.plot(ax=ax, fc="none", ec="k")
 plt.title("With glacier outlines")
 plt.show()
 
@@ -99,39 +119,48 @@ plt.show()
 
 
 pipeline = xdem.coreg.BiasCorr() + xdem.coreg.ICP() + xdem.coreg.NuthKaab()
-pipeline.fit(reference_dem, corrected_dem, inlier_mask=inlier_mask)
-dem_pipe= pipeline.apply(corrected_dem)
+pipeline.fit(reference_dem, dem_to_be_aligned, inlier_mask=inlier_mask, verbose= True)
+dem_pipe= pipeline.apply(dem_to_be_aligned)
 
-pipe_before = reference_dem - corrected_dem
+pipe_before = reference_dem - dem_to_be_aligned
 pipe_after = reference_dem - dem_pipe
 
 
+# compare median and nmad 
 
-pipe_after.show(cmap="coolwarm_r", vmin=-20, vmax=20, cbar_title="Elevation change (m)")
-pipe_before.show(cmap="coolwarm_r", vmin=-10, vmax=10, cbar_title="Elevation change (m)")
 
+inliers_pipe_before = pipe_before[inlier_mask]
+med_pipe_before, nmad_pipe_before = np.median(inliers_pipe_before), xdem.spatialstats.nmad(inliers_pipe_before)
+
+inliers_pipe_after = pipe_after[inlier_mask]
+med_pipe_after, nmad_pipe_after = np.median(inliers_pipe_after), xdem.spatialstats.nmad(inliers_pipe_after)
+
+print(f"Error before: median = {med_pipe_before:.2f} - NMAD = {nmad_pipe_before:.2f} m")
+print(f"Error after: median = {med_pipe_after:.2f} - NMAD = {nmad_pipe_after:.2f} m")
+
+
+
+
+
+# plot 
 
 
 ax = plt.subplot(111)
 pipe_before.show(ax=ax, cmap="coolwarm_r", vmin=-20, vmax=20, cbar_title="Elevation change (m)")
-outlines_2015.ds.plot(ax=ax, fc="none", ec="k")
-plt.xlim(icp_before.bounds.left, icp_before.bounds.right)
-plt.ylim(icp_before.bounds.bottom, icp_before.bounds.top)
+inlier_mask.ds.plot(ax=ax, fc="none", ec="k")
+# plt.xlim(pipe_before.bounds.left, pipe_before.bounds.right)
+# plt.ylim(pipe_before.bounds.bottom, pipe_before.bounds.top)
 plt.title("With glacier outlines")
 plt.show()
 
 
 ax = plt.subplot(111)
 pipe_after.show(ax=ax, cmap="coolwarm_r", vmin=-20, vmax=20, cbar_title="Elevation change (m)")
-outlines_2015.ds.plot(ax=ax, fc="none", ec="k")
-plt.xlim(icp_before.bounds.left, icp_before.bounds.right)
-plt.ylim(icp_before.bounds.bottom, icp_before.bounds.top)
+inlier_mask.ds.plot(ax=ax, fc="none", ec="k")
+# plt.xlim(pipe_before.bounds.left, pipe_before.bounds.right)
+# plt.ylim(pipe_before.bounds.bottom, pipe_before.bounds.top)
 plt.title("With glacier outlines")
 plt.show()
 
-# saving the nuth and kaab dem
-cor_after.save("nuth&kaab.tif")
-
-# saving the final coregistered dem
-
-pipe_after.save("coregistered.tif")
+# saving the coregistered data
+cor_after.save("nk_corr.tif")
