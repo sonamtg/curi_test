@@ -32,8 +32,8 @@ nuth_kaab = xdem.coreg.NuthKaab()
 nuth_kaab.fit(reference_dem, dem_to_be_aligned, inlier_mask=inlier_mask, verbose= True)
 dem_coreg = nuth_kaab.apply(dem_to_be_aligned)
 
-cor_before = reference_dem - dem_to_be_aligned
-cor_after = reference_dem - dem_coreg
+cor_before = dem_to_be_aligned - reference_dem 
+cor_after = dem_coreg - reference_dem 
 
 
 cor_after.show(cmap="coolwarm_r", vmin=-20, vmax=20, cbar_title="Elevation change (m)")
@@ -74,8 +74,8 @@ icp = xdem.coreg.ICP()
 icp.fit(reference_dem, dem_to_be_aligned, inlier_mask=inlier_mask, verbose= True)
 dem_icp= icp.apply(dem_to_be_aligned)
 
-icp_before = reference_dem - dem_to_be_aligned
-icp_after = reference_dem - dem_icp
+icp_before = dem_to_be_aligned - reference_dem 
+icp_after = dem_icp - reference_dem 
 
 
 icp_after.show(cmap="coolwarm_r", vmin=-20, vmax=20, cbar_title="Elevation change (m)")
@@ -122,8 +122,8 @@ pipeline = xdem.coreg.BiasCorr() + xdem.coreg.ICP() + xdem.coreg.NuthKaab()
 pipeline.fit(reference_dem, dem_to_be_aligned, inlier_mask=inlier_mask, verbose= True)
 dem_pipe= pipeline.apply(dem_to_be_aligned)
 
-pipe_before = reference_dem - dem_to_be_aligned
-pipe_after = reference_dem - dem_pipe
+pipe_before = dem_to_be_aligned - reference_dem 
+pipe_after =  dem_pipe - reference_dem 
 
 
 # compare median and nmad 
@@ -164,3 +164,5 @@ plt.show()
 
 # saving the coregistered data
 cor_after.save("nk_corr.tif")
+pipe_after.save("pipe.tif")
+icp_after.save("icp.tif")
