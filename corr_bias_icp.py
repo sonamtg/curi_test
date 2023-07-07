@@ -17,27 +17,17 @@ outlines_2015= gu.Vector("data/Storglaciaren_Extents_2022/Storglaciaren_Extents_
 inlier_mask = ~outlines_2015.create_mask(reference_dem)
 
 
-# bias corr
 
-bias_corr = coreg.BiasCorr()
-bias_corr.fit(reference_dem, dem_to_be_aligned, inlier_mask=inlier_mask, verbose=True)
+# nuth and kaab and bias adjust
 
-corrected_dem = bias_corr.apply(dem_to_be_aligned)
+bias_nuth = xdem.coreg.BiasCorr() + xdem.coreg.NuthKaab()
+bias_nuth.fit(reference_dem, dem_to_be_aligned, inlier_mask=inlier_mask, verbose= True)
+dem_coreg = bias_nuth.apply(dem_to_be_aligned)
 
-
-
-# nuth and kaab cor 
-
-nuth_kaab = xdem.coreg.NuthKaab()
-nuth_kaab.fit(reference_dem, dem_to_be_aligned, inlier_mask=inlier_mask, verbose= True)
-dem_coreg = nuth_kaab.apply(dem_to_be_aligned)
-
-cor_before = dem_to_be_aligned - reference_dem 
-cor_after = dem_coreg - reference_dem 
+cor_before = dem_to_be_aligned - reference_dem
+cor_after = dem_coreg - reference_dem
 
 
-cor_after.show(cmap="coolwarm_r", vmin=-20, vmax=20, cbar_title="Elevation change (m)")
-cor_before.show(cmap="coolwarm_r", vmin=-10, vmax=10, cbar_title="Elevation change (m)")
 
 # compare median and nmad 
 
@@ -51,7 +41,8 @@ med_after, nmad_after = np.median(inliers_after), xdem.spatialstats.nmad(inliers
 print(f"Error before: median = {med_before:.2f} - NMAD = {nmad_before:.2f} m")
 print(f"Error after: median = {med_after:.2f} - NMAD = {nmad_after:.2f} m")
 
-# plot 
+
+
 
 ax = plt.subplot(111)
 cor_after.show(ax=ax, cmap="coolwarm_r", vmin=-20, vmax=20, cbar_title="Elevation change (m)")
@@ -68,22 +59,15 @@ plt.show()
 
 
 
-# icp cor 
 
-icp = xdem.coreg.ICP()
-icp.fit(reference_dem, dem_to_be_aligned, inlier_mask=inlier_mask, verbose= True)
-dem_icp= icp.apply(dem_to_be_aligned)
+# icp bias adjust 
 
-icp_before = dem_to_be_aligned - reference_dem 
-icp_after = dem_icp - reference_dem 
+bias_icp = xdem.coreg.BiasCorr() + xdem.coreg.ICP()
+bias_icp.fit(reference_dem, dem_to_be_aligned, inlier_mask=inlier_mask, verbose= True)
+dem_icp= bias_icp.apply(dem_to_be_aligned)
 
-
-icp_after.show(cmap="coolwarm_r", vmin=-20, vmax=20, cbar_title="Elevation change (m)")
-icp_before.show(cmap="coolwarm_r", vmin=-10, vmax=10, cbar_title="Elevation change (m)")
-
-
-
-# compare median and nmad 
+icp_before = dem_to_be_aligned - reference_dem
+icp_after = dem_icp - reference_dem
 
 
 inliers_icp_before = icp_before[inlier_mask]
@@ -94,6 +78,7 @@ med_icp_after, nmad_icp_after = np.median(inliers_icp_after), xdem.spatialstats.
 
 print(f"Error before: median = {med_icp_before:.2f} - NMAD = {nmad_icp_before:.2f} m")
 print(f"Error after: median = {med_icp_after:.2f} - NMAD = {nmad_icp_after:.2f} m")
+
 
 
 
@@ -122,8 +107,8 @@ pipeline = xdem.coreg.BiasCorr() + xdem.coreg.ICP() + xdem.coreg.NuthKaab()
 pipeline.fit(reference_dem, dem_to_be_aligned, inlier_mask=inlier_mask, verbose= True)
 dem_pipe= pipeline.apply(dem_to_be_aligned)
 
-pipe_before = dem_to_be_aligned - reference_dem 
-pipe_after =  dem_pipe - reference_dem 
+pipe_before = dem_to_be_aligned - reference_dem
+pipe_after = dem_pipe - reference_dem
 
 
 # compare median and nmad 
@@ -163,6 +148,6 @@ plt.title("With glacier outlines")
 plt.show()
 
 # saving the coregistered data
-cor_after.save("nk_corr.tif")
-pipe_after.save("pipe.tif")
-icp_after.save("icp.tif")
+cor_after.save("data/nk_corr.tif")
+pipe_after.save("data/pipe.tif")
+icp_after.save("data/icp.tif")
