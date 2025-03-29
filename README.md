@@ -16,7 +16,7 @@
   - Hillshade plots  
 - Created datasets:  
   - stor_cor_df from coregistered raster  
-  - `stor_cor_glacier` containing:  
+  - stor_cor_glacier containing:  
     - Slope degrees  
     - Eastness/Northness  
     - Slope bins  
