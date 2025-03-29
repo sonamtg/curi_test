@@ -1,0 +1,146 @@
+---
+title: "data_orientation"
+output: html_document
+date: '2023-10-29'
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include = FALSE}
+library(tidyverse)
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+rwb <- colorRampPalette(c("red", "white", "blue"))(50) # color palette 
+
+```
+
+#raster data 
+```{r}
+setwd("/home/rstudio/users/gurung2/curi_test")
+nk_cor <- raster("data/nk_corr.tif") #coreg raster pulled from github we used nuth and kaab open source to code on phyton. 
+pipe_cor <- raster("data/pipe.tif") #coreg raster pulled from github we used nuth and kaab open source to code on phyton this includes nuth and kaab, icp and bias correction. 
+icp <- raster("data/icp.tif") #coreg raster pulled from github we used nuth and kaab open source to code on phyton this includes icp only. 
+lidar_2m <- raster("data/Tarfala_Lantmatriet_2015AUG21_2M.tif") #2015 data 
+plan_curv <- raster("data/lidar_plan_curv.tif") # plan curvature 
+max_curv <- raster("data/lidar_max_curv.tif") # max curvature 
+prof_curv <- raster("data/lidar_prof_curv.tif") # prof curvature
+uav_2m_utm <- raster("data/storglaciaren_2022_sept_uav_2m_SWEREF99_TM.tif") #2022 data 
+storglacier <- shapefile("data/Storglaciaren_Extents_2022/Storglaciaren_Extents_2022SEP.shp") #outline of 2022
+```
+
+What this code chunck does:
+stor cor df is created from stor stack (that includes lidar_2m, plan_curve, max_curve, prof_curve, nk_cor(coregistered), stor_terrain and stor_mask).  
+stor cor df have: 
+        Categorical variable of data on and off the glacier 
+        bins of elevation , slope degrees, aspect (northness and eastness), curvature,
+        
+We write over this data frame into a csv to use for interpolation.
+
+
+```{r}
+# outlier removal after correction 
+# # nuth and kaab 
+ names(nk_cor) <- "elev_diff"
+ names(lidar_2m) <- "elev"
+ blank <- nk_cor
+ values(blank) <- 1
+ stor_mask <- mask(blank, storglacier) 
+ names(stor_mask) <- "is.glacier"
+stor_terrain <- terrain(lidar_2m, c("slope", "aspect"))
+stor_stack <- stack(lidar_2m, plan_curv, max_curv, prof_curv,nk_cor, stor_mask, stor_terrain) 
+  
+ stor_cor_df <- stor_stack %>% 
+   as.data.frame(xy = TRUE) %>%
+   as_tibble() %>%
+   mutate(is.glacier = ifelse(is.na(is.glacier), 0, 1))%>%
+   mutate(elev_cut = cut_width(elev, width = 50, center = 1325, dig.lab = 4)) %>%  
+  mutate(slope_degrees = (as.numeric(slope)*180)/pi) %>% 
+  group_by(elev_cut, is.glacier) %>% 
+  mutate(med_with_outliers = median(elev_diff, na.rm = TRUE), 
+         mad_with_outliers = mad(elev_diff, na.rm = TRUE)) %>% 
+  mutate(uppest = med_with_outliers + mad_with_outliers*3) %>% 
+  mutate(lowest = med_with_outliers - mad_with_outliers*3) %>% 
+  mutate(elev_diff_no_outliers = ifelse(elev_diff <= uppest & elev_diff >= lowest, elev_diff, NA)) %>% # making the outliers NA
+  ungroup() %>%  
+  mutate(aspect_degrees = (as.numeric(aspect)*180)/pi) %>% 
+  mutate(northness = cos(aspect),
+         eastness = sin(aspect)) %>% 
+  mutate(aspect_cut = cut_width(aspect_degrees, width = 10, center = 25),
+         northness_cut = cut_number(northness, n = 10),
+         eastness_cut = cut_number(eastness, n = 10)) %>% 
+  mutate(slope_cut = cut_number(slope_degrees, 15)) %>% 
+  #filter(abs(lidar_max_curv) < 5 | abs(lidar_plan_curv) < 5 | abs(lidar_prof_curv))
+ # filter(is.glacier == 1) %>% 
+  mutate(max_curv = abs(lidar_max_curv),
+         plan_curv = abs(lidar_plan_curv),
+         prof_curv = abs(lidar_prof_curv)) %>% 
+  mutate(plan_curve_bin = cut_number(plan_curv, n = 15)) %>%
+  mutate(prof_curve_bin = cut_number(prof_curv, n = 15)) %>%
+  mutate(max_curve_bin = cut_number(max_curv, n = 15)) #abs(curve) comes from hugonnet
+  
+ 
+filt_values <- stor_cor_df |>
+  drop_na(elev_diff) |> 
+  dplyr::select(x, y) |>
+  sapply(range, na.rm = TRUE)
+
+filt_values
+
+
+stor_cor_df |>
+  filter(x >= filt_values[1, 1], x <= filt_values[2, 1],
+         y >= filt_values[1, 2], y <= filt_values[2, 2]) |>
+   ggplot(aes(x, y, fill = elev_diff_no_outliers)) +
+  geom_raster()
+
+stor_cor_df <- stor_cor_df |>
+  filter(x >= filt_values[1, 1], x <= filt_values[2, 1],
+         y >= filt_values[1, 2], y <= filt_values[2, 2])
+
+library(sf)
+
+storglaciersf <- st_as_sf(storglacier, coords = c("x", "y"))
+
+
+stor_cor_df %>%
+  ggplot() + 
+  geom_raster(aes(x, y, fill = elev_diff)) +  
+  geom_sf(data = storglaciersf, fill = NA, color = "black") + #making the outline
+  scale_fill_gradient2(low = "#ca0020", mid = "white", high = "#0571b0",
+                       midpoint = 0, limits = c(-15, 15))+
+  theme_void() + 
+  labs(fill = "Elevation Difference") +
+  theme(plot.background = element_rect(fill = "darkgrey"),
+        legend.text = element_text(size = 12),   # Set the legend text size
+        legend.title = element_text(size = 18), # Set the legend title size 
+        legend.box.background = element_rect(fill = "darkgrey", color = "darkgrey")) +
+  xlim(c(648000, 652000)) +
+  ylim(c(7535000, 7538000)) 
+
+stor_cor_df %>%
+  ggplot() + 
+  geom_raster(aes(x, y, fill = elev_diff_no_outliers)) +  
+  geom_sf(data = storglaciersf, fill = NA, color = "black") + #making the outline
+  scale_fill_gradient2(low = "#ca0020", mid = "white", high = "#0571b0",
+                       midpoint = 0, limits = c(-15, 15))+
+  theme_void() + 
+  labs(fill = "Elevation Difference") +
+  theme(plot.background = element_rect(fill = "darkgrey"),
+        legend.text = element_text(size = 12),   # Set the legend text size
+        legend.title = element_text(size = 18), # Set the legend title size 
+        legend.box.background = element_rect(fill = "darkgrey", color = "darkgrey")) +
+  xlim(c(648000, 652000)) +
+  ylim(c(7535000, 7538000)) 
+
+
+
+ #write_csv(stor_cor_df, "data/stor_cor_df.csv")
+
+```
+

@@ -1,0 +1,57 @@
+---
+title: "Using XDEM to calculate Curvature"
+author: "Laura Boehm Vock"
+date: "2023-05-22"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+rwb <- colorRampPalette(c("red", "white", "blue"))(50)
+
+setwd("~/Google Drive/Shared drives/Geodetic Glacier Volume Change/Storglaciaren Sweden")  
+```
+
+## Set up python to use Xdem
+```{r}
+setwd("/Users/boehm") 
+library(reticulate)
+virtualenv_create("storglaciaren")
+py_install("opencv-contrib-python", envname = "storglaciaren")
+py_install("xdem", envname="storglaciaren")
+use_virtualenv("storglaciaren")
+```
+
+```{python}
+#import opencv-contrib-python
+import geoutils as gu
+import matplotlib.pyplot as plt 
+import numpy as np
+import xdem
+import pandas as pd
+```
+
+```{python}
+lidar_dem = xdem.DEM("Sweden_Landmateriet_DEM_2015/Tarfala_Lantmatriet_2015AUG21_2M.tif")
+print(lidar_dem)
+
+plan_curvature = xdem.terrain.planform_curvature(lidar_dem)
+prof_curvature = xdem.terrain.profile_curvature(lidar_dem)
+
+plan_curvature.show(cmap = "RdGy_r", vmin = -1, vmax = 1)
+prof_curvature.show(cmap = "RdGy_r", vmin = -1, vmax = 1)
+
+# plan_curvature.save("Sweden_Landmateriet_DEM_2015/lidar_plan_curv.tif")
+# prof_curvature.save("Sweden_Landmateriet_DEM_2015/lidar_prof_curv.tif")
+```
+
+```{r}
+plan_curv <- raster("Sweden_Landmateriet_DEM_2015/lidar_plan_curv.tif")
+prof_curv <- raster("Sweden_Landmateriet_DEM_2015/lidar_prof_curv.tif")
+```

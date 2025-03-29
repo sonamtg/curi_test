@@ -1,1 +1,0 @@
-# curi_test

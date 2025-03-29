@@ -1,0 +1,103 @@
+---
+title: "Coreg_eda"
+output: html_document
+date: '2023-06-30'
+editor_options: 
+  chunk_output_type: console
+---
+```{r, message = FALSE}
+library(tidyverse)
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+library(ggplot2)
+library(ggplotify)
+library(sf)
+library(tmap)
+library(gstat)
+library(sp)
+rwb <- colorRampPalette(c("red", "white", "blue"))(50)
+setwd("/home/rstudio/users/gurung2/curi_test")
+stor_cor_zscore <- read_csv("data/stor_cor_zscore.csv") 
+lidar_2m <- raster("data/Tarfala_Lantmatriet_2015AUG21_2M.tif")
+#stor_residuals <- read_csv("data/stor_residuals.csv") ??? might be for the residual variogram plot that laura mentioned in her email
+```
+
+# Setting up
+```{r}
+# stor_cor_glacier.sf <- st_as_sf(stor_cor_glacier, coords = c("x", "y")) 
+# stor_cor_glacier.sf <- st_set_crs(stor_cor_glacier.sf, st_crs(lidar_2m)) 
+# 
+# summary(stor_cor_glacier.sf$z_score)
+# 
+# # stor_cor_glacier.sf2 <- stor_cor_glacier.sf %>%
+# #   filter(!is.na(total_dec11)) What to replace the inside variable with, btw, no NAs for this dataset
+# 
+# storXY <- as.data.frame(st_coordinates(stor_cor_glacier.sf))
+# stor_cor_glacier.sf$X <- storXY$X
+# stor_cor_glacier.sf$Y <- storXY$Y
+```
+
+With everything being set up, let us make that variogram
+
+#Variogram z_score (Rolstad) by taking a popn sample of 5000 as variogram computation is too instensive for the entire dataset
+
+```{r}
+#randomize 5000 points
+
+
+set.seed(1234)
+
+
+stor_cor_nona <- stor_cor_zscore %>% 
+  drop_na(z_score) #had to drop the z_score na because variogram function doesn't do too well with missing values
+
+# Take a random sample of size 5000
+popu_sample <- stor_cor_nona[sample(nrow(stor_cor_nona), size = 5000, replace = TRUE), ]
+
+
+stor.sf <- st_as_sf(popu_sample, coords = c("x", "y"))
+stor.sf
+
+stor.sf <- st_set_crs(stor.sf, st_crs(3006)) #cord refrence system lidar_2m uses 
+stor.sf
+summary(stor.sf)
+
+vari_med <- variogram(z_score~1, data = stor.sf)
+# short scale variogram to take the first spike-up into account with a smaller cutoff
+vari_med1 <- variogram(z_score ~ 1 , data = stor.sf, width = 10, cutoff = 400) 
+
+# long scale variogram to take the second spike-up into account with a much larger cutooff
+# anything more than 2000 is just noise, so no need to take a look
+vari_med2 <- variogram(z_score ~ 1 , data = stor.sf, width = 100, cutoff = 2000) 
+
+plot(vari_med)
+# plotting 
+plot(vari_med1, main = "Spherical Semivariogram")
+plot(vari_med2, main = "Spherical Semivariogram")
+
+# fitting the variograms by adjusting the parameters
+vari_med_fit <- fit.variogram(vari_med1, 
+                            vgm("Sph", psill = (0.38 - 0.015), nugget = 0.015, range = 200))
+
+vari_med_fit2 <- fit.variogram(vari_med2, 
+                            vgm("Sph", psill = (0.6 - 0.05), nugget = 0.05, range = 1000))
+#double check to see if we selected the right parameters 
+vari_fit_test <- fit.variogram(vari_med, vgm("Sph", psill = (1.3-0.5), nugget = 0.5, range = 500))
+plot(vari_med,model = vari_fit_test)
+vari_med_fit
+vari_med_fit2
+
+par(mfrow = c(1, 2))
+plot(vari_med1, model = vari_med_fit, main = "Short-Range Fitted Semivariogram")
+plot(vari_med2, model = vari_med_fit2, main = "Long-Range Fitted Semivariogram")
+
+
+# (1.94/1000)^2 * (3.1) + (0.0531)^2 * (1.45/1000)^2
+```
+
+#Detrending - mean should be zero
+#Standardize - Standard deviation should be one
+
+

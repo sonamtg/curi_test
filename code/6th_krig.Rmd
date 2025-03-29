@@ -1,0 +1,138 @@
+---
+title: "Krig_meraf"
+output: html_document
+date: '2023-07-31'
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(raster)
+library(sf)
+library(tmap)
+library(gstat)
+library(sp)
+library(dplyr) # for "glimpse"
+library(ggplot2)
+ library(scales) # for "comma"
+ library(magrittr)
+storglacier <- shapefile("data/Storglaciaren_Extents_2022/Storglaciaren_Extents_2022SEP.shp") #outline of 2022
+lidar_2m <- raster("data/Tarfala_Lantmatriet_2015AUG21_2M.tif") #2015 data 
+nk_cor <- raster("data/nk_corr.tif") 
+
+```
+
+```{r}
+stor_cor_glacier <- read_csv("data/stor_cor_glacier.csv")
+stor_void_zoomed <- read_csv("data/stor_void_zoomed.csv")
+prediction_z1 <-read_csv("data/predictions_z1.csv")
+
+```
+
+# looking at only the void region 
+```{r}
+stor_void_zoomed <- stor_cor_glacier %>% 
+  filter(x >= 648200, x <= 648800 & y >= 7536500, y<= 7539000)
+
+```
+
+```{r}
+# create coordinate reference system 
+stor.sf <- stor_void_zoomed %>% 
+  drop_na(z_score)%>%# dropping the z-score na values
+  st_as_sf(coords = c("x","y"))%>%
+  st_set_crs(st_crs(lidar_2m))
+
+#filter na values 
+stor_void_na <- stor_void_zoomed%>%
+  filter(is.na(z_score))%>%
+  st_as_sf(coords = c("x","y"))%>%
+  st_set_crs(st_crs(lidar_2m))
+
+
+vari_krig1 <- variogram(z_score ~ 1 , data = stor.sf, width = 10) #previous variogram uses a cutoff 400
+plot(vari_krig1, main = "Spherical Semivariogram")
+
+
+vari_krig_fit <- fit.variogram(vari_krig1, 
+                            vgm("Sph", psill = (0.38 - 0.015), nugget = 0.015, range = 100))
+
+
+vari_krig_fit
+
+
+plot(vari_krig_fit, model = vari_krig_fit, main = "Fitted Semivariogram")
+plot(vari_krig2, model = vari_krig_fit2, main = "Fitted Semivariogram")
+
+stor_void_raster <- rasterFromXYZ(stor_void_zoomed)
+
+kriging_model <- gstat::gstat(formula = z_score ~ 1, locations = stor.sf, model = vari_krig_fit)
+
+# the nxt line takes a very long time to run, so we commented it out. The predicted data set is stored as predicted_z1.csv
+# predictions_z <- predict(kriging_model, newdata = stor_na, nmin = 3)
+
+
+stor_void_na <- as.tibble(cbind(stor_void_na, prediction_z1))
+
+stor_void_na <- stor_void_na %>% 
+  right_join(stor_cor_glacier)%>%
+  mutate(krig_elev_diff = (ifelse(is.na(elev_diff), var1.pred *pred_mad + pred_med_elev_diff,elev_diff)))
+
+
+
+stor_rast <- stor_void_na %>% 
+  inner_join(stor_cor_glacier) %>% 
+dplyr::select(x, y, krig_elev_diff) %>% 
+  rasterFromXYZ()
+
+
+par(mfrow= c(1,2))
+void_zoomed <- c(648200, 648800, 7536500, 7539000)
+stor_zoomed <- crop(nk_cor, extent(void_zoomed)) %>% trim()
+plot(stor_zoomed, col = rwb1, zlim = c(-15,15), 
+     main = "Before Interpolation", xaxt = "n", yaxt = "n")
+par(bg = "darkgray")
+interpolated_zoomed<- crop(stor_rast, extent(void_zoomed)) %>% trim()
+plot(interpolated_zoomed,  col = rwb1, zlim = c(-15,15), 
+     main = "After Interpolation", xaxt = "n", yaxt = "n", legend = FALSE)
+
+
+
+rwb1 <- colorRampPalette(c("red", "white", "blue"))(50)
+plot(stor_rast, col = rwb1, zlim = c(-15,15))
+
+#we can join with the other data set without na 
+```
+
+# Comparing the total voln change only in the filled (original void) area
+
+```{r}
+
+# for the kriging model
+stor_void_na %>% 
+   summarise(total_vol_chg = sum(krig_elev_diff) * 4/1000^3) # -0.000123 km^3
+
+# for the hypsometric method
+stor_cor_glacier %>% 
+  filter(is_predicted == TRUE) %>% 
+  summarise(total_vol_chg = sum(pred_elev_diff) * 4/1000^3) # -0.000109 km^3
+
+
+
+  
+```
+
+
+
+```{r}
+#write_csv(stor_void_zoomed, "data/stor_void_zoomed.csv")
+# write_csv(predictions_z, "data/predictions_z1.csv")
+write_csv(stor_void_na, "data/stor_void_na.csv")
+```
+
+

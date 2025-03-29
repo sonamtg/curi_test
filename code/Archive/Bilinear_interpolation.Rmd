@@ -1,0 +1,141 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r, message = FALSE}
+library(tidyverse)
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+library(sf)
+library(tibble)
+library(tidymodels)
+library(caret)
+library(stats)
+library(akima)
+require(utils)
+
+
+stor_cor_glacier <- read_csv("data/stor_cor_glacier.csv")
+stor_void_zoomed <- read_csv("data/stor_void_zoomed.csv")
+lidar_2m <- raster("data/Tarfala_Lantmatriet_2015AUG21_2M.tif")
+nk_cor <- raster("data/nk_corr.tif") 
+stor_interp <- read_csv("data/stor_interp.csv")
+```
+
+#this is a second interpolation method (Bilinear interpolation: using the surrounding data points to void fill)
+
+```{r}
+#648200, 648800, 7536500, 7539000 (interpolation values)
+
+# x <- c(0, 2.5, 5, 7.5, 10)
+# y <- c(50, 55, 60, 65, 70)
+# z <- matrix(rnorm(25), 5, 5)
+# x0 <- seq(0, 10, .5)
+# y0 <- seq(50, 70, length = length(x0))
+# 
+# bi <- bilinear(x, y, z, x0, y0)
+# 
+# plot(sqrt(bi$x^2+bi$y^2), bi$z, type="l")
+```
+
+
+
+
+```{r}
+stor_cor_glacier1 <- stor_void_zoomed %>% 
+  drop_na(elev_diff_no_outliers)
+
+
+x <- stor_cor_glacier1$x
+y <- stor_cor_glacier1$y
+z <- stor_cor_glacier1$elev_diff_no_outliers
+
+
+inter <- interp(x, y, z, xo=seq(min(x), max(x), length = 10),
+                yo = seq(min(y), max(y), length = 5))
+
+interp2xyz(inter,data.frame =TRUE)
+
+# Step 2:
+new_xo <- unique(stor_void_zoomed$x)
+new_yo <- unique(stor_void_zoomed$y)
+
+# new_x1 <- unique(stor.sf$x)
+# new_y1 <- unique(stor.sf$y)
+
+interp(x, y, z, xo = new_xo,
+       yo = new_yo)
+
+inter_new <- interp(x, y, z, xo = seq(min(new_xo), max(new_xo)), #length = 10),
+                    yo = seq(min(new_yo), max(new_yo))) #, length = 5))
+
+stor_interp <- tibble(interp2xyz(inter_new, data.frame = TRUE)) %>% 
+  rename(z_elev_diff = z) %>% 
+  inner_join(stor_void_zoomed)
+  #mutate(z_score = z_elev_diff - stor_void_zoomed$pred_med_elev_diff/(stor_void_zoomed$pred_mad))
+
+sum(is.na(stor_interp$elev_diff))
+sum(is.na(stor_interp$elev_diff_no_outliers))
+sum(is.na(stor_interp$z_elev_diff)) #This is what we want the differnce in the numbers of NAs
+
+
+
+```
+
+```{r}
+#Interpolation Plot
+
+fill_raster <- stor_interp %>% 
+  dplyr::select(x, y, z_elev_diff) %>% 
+  rasterFromXYZ()
+rwb1 <- colorRampPalette(c("red", "white", "blue"))(50)
+
+par(mfrow= c(1,2))
+void_zoomed <- c(648200, 648800, 7536500, 7539000)
+stor_zoomed <- crop(nk_cor, extent(void_zoomed)) %>% trim()
+plot(stor_zoomed, col = rwb1, zlim = c(-15,15), 
+     main = "Before Interpolation", xaxt = "n", yaxt = "n")
+par(bg = "darkgray")
+interpolated_zoomed<- crop(fill_raster, extent(void_zoomed)) %>% trim()
+plot(interpolated_zoomed,  col = rwb1, zlim = c(-15,15), 
+     main = "After Interpolation", xaxt = "n", yaxt = "n", legend = FALSE)
+
+```
+
+```{r}
+#Using data read from stor_interp.csv
+
+stor_bilinear <- stor_interp %>% 
+  mutate(bilinear_filled = ifelse(is.na(elev_diff), z_elev_diff, elev_diff))
+
+  
+
+fill_raster <- stor_bilinear %>% 
+  dplyr::select(x, y, bilinear_filled) %>% 
+  rasterFromXYZ()
+rwb1 <- colorRampPalette(c("red", "white", "blue"))(50)
+
+par(mfrow= c(1,2))
+void_zoomed <- c(648200, 648800, 7536500, 7539000)
+stor_zoomed <- crop(nk_cor, extent(void_zoomed)) %>% trim()
+plot(stor_zoomed, col = rwb1, zlim = c(-15,15), 
+     main = "Before Interpolation", xaxt = "n", yaxt = "n")
+par(bg = "darkgray")
+interpolated_zoomed<- crop(fill_raster, extent(void_zoomed)) %>% trim()
+plot(interpolated_zoomed,  col = rwb1, zlim = c(-15,15), 
+     main = "After Interpolation", xaxt = "n", yaxt = "n", legend = FALSE)
+
+
+#Total volume change
+
+#stor_bilinear %>% 
+  #filter(!is.na(z_elev_diff)) %>% 
+  #summarise(total_vol_chg = sum(z_elev_diff) * 4/1000^3)#-0.000215 km^3
+
+```
+
+
+

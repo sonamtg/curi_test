@@ -1,0 +1,153 @@
+---
+title: "Error prop"
+output: html_document
+date: '2023-07-24'
+editor_options: 
+  chunk_output_type: console
+---
+```{r, message = FALSE}
+library(tidyverse)
+library(raster)
+library(sf)
+library(tmap)
+library(gstat)
+library(sp)
+```
+
+```{r}
+setwd("/home/rstudio/users/gurung2/curi_test")
+lidar_2m <- raster("data/Tarfala_Lantmatriet_2015AUG21_2M.tif") 
+stor_cor_glacier <- read_csv("data/stor_cor_glacier.csv")
+```
+
+
+# data set 
+# directly use interpolated_stor?
+
+```{r}
+# stor_final <- stor_no_outliers %>% #remove the outliers
+#   right_join(interpolated_stor) #clean up datasets throughout datasets
+#lost some values from interpolated_stor
+#full or left join
+```
+
+
+
+# volume change before error prop 
+
+```{r}
+# interpolated_stor %>% 
+#   summarise(count = n(), total_vol_chg = (mean(elev_diff))*4*count)
+# 
+stor_cor_glacier %>%
+  summarise(total_vol_chg = (sum(filled_elev_diff) * 4)/1000^3, 
+            total_vol_chg_meters = sum(filled_elev_diff)*4,
+            area_meters = 4 * n(),
+            med_elev_diff = median(filled_elev_diff),
+            avg_elev_diff = mean(filled_elev_diff)) #  -0.00781 km^3
+
+```
+
+
+```{r}
+stor_cor_glacier %>%
+  dplyr::count(is.na(elev_diff_no_outliers))
+
+stor_cor_glacier %>%
+  summarise(nmad = mad(elev_diff_no_outliers, na.rm = TRUE))
+# 
+# sapply(lapply(stor_final, unique), length) #1, what we wanted
+```
+
+# error for elev_diff 
+```{r}
+stor_cor_glacier %>%
+  summarise (count = n(), 
+             area = 4 * count, 
+             a = area / 1000^2) #3.1 
+
+error_elev_dif <- stor_cor_glacier %>%
+  group_by(slope_cut, max_curve_bin) %>%
+  summarise(count = n(),
+            count_na = 86947, #might want to look at the dataset again, where are the NAs are coming from
+            nmad_sqr = (mad(elev_diff_no_outliers, na.rm = TRUE))^2) %>%
+  ungroup() %>%
+  #drop_na() %>%
+  #mutate(nmad_sqr = (mad(elev_diff))^2)%>%
+  mutate(A = 4 * count) %>%  #+ count_na) %>% #2*2 = 4 as 2m * 2m per pixel is 4m^2
+  mutate(var_z1 = ((5*A)/ ((pi*(150.5234)^2)*0.3490398)), 
+         var_z2 = ((5*A)/ ((pi*(1059.03)^2)*0.4039148))) %>% 
+  mutate(error_elev = nmad_sqr * (var_z1 + var_z2)) %>%
+  summarise(sum_elev = sum((error_elev)*(A^2)),
+            sum_error_elev_diff = sum(error_elev)) #square error_elev or no?
+
+```
+
+# error for area
+```{r} 
+error_area_avg <- stor_cor_glacier %>%
+  group_by(slope_cut, max_curve_bin) %>%
+  summarise(count = n(), 
+            avg_elev = mean(filled_elev_diff),
+            median_elev = median(filled_elev_diff)) %>%
+  mutate(A = 4*count) %>%
+  mutate(error_a = 0.05*(A)) %>%
+  ungroup()%>%
+  summarise(sum_area_mean = sum((error_a^2)*(avg_elev^2)),
+            sum_area_med = sum((error_a^2)*(median_elev^2)))
+```
+
+#error prop, which is the sum of the error for area and elev_diff
+```{r}
+final_error_avg <- (error_elev_dif$sum_elev + error_area_avg$sum_area_mean) #/1000^3
+
+final_error_med <- (error_elev_dif$sum_elev + error_area_avg$sum_area_med) #/1000^3
+
+sqrt(final_error_avg) / 1000^3
+sqrt(final_error_med) / 1000^3
+
+
+
+```
+
+
+#Overall Error of Prop without using the bins
+```{r}
+nmad_sqr <- (mad(stor_cor_glacier$elev_diff_no_outliers, na.rm = TRUE))^2 #avg(NMAD)^2
+Area = 2886312 
+# neff <- ((5*Area)/ ((pi*(150.5234)^2)*0.3490398)) + ((5*Area)/ ((pi*(1059.03)^2)*0.4039148))
+var_z <- (1/5) * ((pi * (150.5234^2)) / Area) * 0.3490398 + 1/5 * ((pi * (1059.03^2)) / Area) * 0.4039148 #square root of c1 and c2 should match the sd of the z score
+error_elev <- (nmad_sqr*var_z)*(Area^2)
+avg_elev <- (mean(stor_cor_glacier$filled_elev_diff))^2
+med_elev <- (median(stor_cor_glacier$filled_elev_diff)^2)
+error_area_avg <- (0.05*Area)^2 * avg_elev
+error_area_med <- (0.05*Area)^2 * med_elev
+
+
+
+(sqrt((error_elev+error_area_avg)))/1000^3
+(sqrt((error_elev+error_area_med)))/1000^3
+
+#error for elev diff = avg(NMAD)^2 / 5A/pi(r^2)
+#Area = 2886312 m^2
+#error for Area = (.05 * A)^2
+#avg or median elev diff = median(elev_diff_no_outliers)
+```
+
+#not accounting for spatial correlation
+```{r}
+nmad_sqr <- (mad(stor_cor_glacier$elev_diff_no_outliers, na.rm = TRUE))^2 #avg(NMAD)^2
+Area = 2886312 
+# neff <- ((5*Area)/ ((pi*(150.5234)^2)*0.3490398)) + ((5*Area)/ ((pi*(1059.03)^2)*0.4039148))
+error_elev <- (nmad_sqr/721578)*(Area^2)
+avg_elev <- (mean(stor_cor_glacier$filled_elev_diff))^2
+med_elev <- (median(stor_cor_glacier$filled_elev_diff)^2)
+error_area_avg <- (0.05*Area)^2 * avg_elev
+error_area_med <- (0.05*Area)^2 * med_elev
+
+#w/ out accounting for spatial correlation, our uncertainty will be too small. Off by a magnitude
+
+(sqrt((error_elev+error_area_avg)))/1000^3
+(sqrt((error_elev+error_area_med)))/1000^3
+```
+

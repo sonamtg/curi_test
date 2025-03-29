@@ -1,0 +1,61 @@
+---
+title: "Variogram part 2"
+subtitle: "Removing Trend"
+author: "CURI 2023 Peeps"
+date: "1/13/2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, message = FALSE}
+library(tidyverse)
+library(raster)
+library(sf)
+library(tmap)
+library(gstat)
+library(sp)
+```
+
+```{r}
+stor_z <- read_csv("~/curi_test/data/stor_z.csv")
+stor_z <- read_csv("data/stor_z.csv")
+lidar_2m <- raster("data/Tarfala_Lantmatriet_2015AUG21_2M.tif") 
+```
+
+
+```{r}
+#variogram 
+
+set.seed(1234)
+
+# Take a random sample of size 5000
+popu_sample <- stor_z[sample(nrow(stor_z), size = 5000, replace = TRUE), ]
+
+ 
+stor.sf <- st_as_sf(popu_sample, coords = c("x", "y"))
+stor.sf
+
+stor.sf <- st_set_crs(stor.sf, st_crs(lidar_2m))
+stor.sf
+
+
+vari_nmad <- variogram(z_score ~ 1 , data = stor.sf, width = 10) #fix the bin
+plot(vari_nmad, main = "Empirical Semivariogram")
+
+vari_nmad_fit <- fit.variogram(vari_nmad, 
+                            vgm("Exp", psill = (0.4 - 0.01), nugget = 0.01, range = 200)) #depends on your initial values which comes from your emperical plot
+#double check to see if we selected the right parameters 
+
+vari_nmad_fit
+
+plot(vari_nmad, model = vari_nmad_fit, main = "Fitted Semivariogram")
+
+```
+
+
+
+
+
+
+

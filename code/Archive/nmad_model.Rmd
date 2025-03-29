@@ -1,0 +1,380 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r, message = FALSE}
+library(tidyverse)
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+library(ModelMetrics)
+rwb <- colorRampPalette(c("red", "white", "blue"))(50)
+
+stor_no_outliers <- read_csv("~/curi_test/data/stor_no_outliers.csv")
+
+```
+
+
+```{r}
+stor_mad_slope_max <- stor_cor_glacier %>% 
+  group_by(slope_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff),
+         med_slope = median(slope),
+         med_max = median(lidar_max_curv),
+         count = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max)) %>% 
+  mutate(cen_slope = med_slope - median(med_slope))
+```
+
+
+```{r}
+stor_mad_slope_plan <- stor_no_outliers %>% 
+  group_by(slope_cut, plan_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff),
+         med_slope = median(slope),
+         med_plan = median(lidar_plan_curv),
+         count = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_plan = med_plan - median(med_plan)) %>% 
+  mutate(cen_slope = med_slope - median(med_slope))
+```
+
+
+```{r}
+stor_mad_slope_prof <- stor_no_outliers %>% 
+  group_by(slope_cut, prof_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff),
+         med_slope = median(slope),
+         med_prof = median(lidar_prof_curv),
+         count = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_prof = med_prof - median(med_prof)) %>% 
+  mutate(cen_slope = med_slope - median(med_slope))
+```
+
+
+```{r}
+stor_mad_slope_plan_prof <- stor_no_outliers %>% 
+  group_by(slope_cut, plan_curve_bin, prof_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff),
+         med_slope = median(slope),
+         med_plan = median(lidar_plan_curv),
+         med_prof = median(lidar_prof_curv),
+         count = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_plan = med_plan - median(med_plan),
+         cen_prof = med_prof - median(med_prof)) %>% 
+  mutate(cen_slope = med_slope - median(med_slope)) 
+```
+
+```{r}
+stor_mad_slope_max_plan <- stor_no_outliers %>% 
+  group_by(slope_cut, max_curve_bin, plan_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff),
+         med_slope = median(slope_degrees),
+         med_max = median(lidar_max_curv),
+         med_plan = median(lidar_plan_curv),
+         count = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max),
+         cen_plan = med_plan - median(med_plan)) %>% 
+  mutate(cen_slope = med_slope - median(med_slope)) 
+
+```
+
+
+
+```{r}
+nmad_slope_max1 <- lm(mad_elev_diff ~ cen_slope, data = stor_mad_slope_max, weights = count)
+summary(nmad_slope_max1)
+
+nmad_slope_max2 <- lm(mad_elev_diff ~ I(cen_slope) + I(cen_slope ^ 2), data = stor_mad_slope_max, weights = count)
+summary(nmad_slope_max2)
+
+nmad_slope_max3 <- lm(mad_elev_diff ~ I(cen_slope) + I(cen_slope ^ 2) + I(cen_slope ^ 3), data = stor_mad_slope_max, weights = count)
+summary(nmad_slope_max3)
+
+```
+
+```{r}
+anova(nmad_slope_max1, nmad_slope_max2)
+anova(nmad_slope_max2, nmad_slope_max3)
+anova(nmad_slope_max1, nmad_slope_max3)
+
+# nmad_slope_max3
+
+```
+
+```{r}
+nmad_slope_plan1 <- lm(mad_elev_diff ~ cen_slope, data = stor_mad_slope_plan, weights = count)
+summary(nmad_slope_plan1)
+
+nmad_slope_plan2 <- lm(mad_elev_diff ~ I(cen_slope) + I(cen_slope ^ 2), data = stor_mad_slope_plan, weights = count)
+summary(nmad_slope_plan2)
+
+nmad_slope_plan3 <- lm(mad_elev_diff ~ I(cen_slope) + I(cen_slope ^ 2) + I(cen_slope ^ 3), data = stor_mad_slope_plan, weights = count)
+summary(nmad_slope_plan3)
+
+#nmad_slope_plan3 has the biggest rsquare value
+
+
+```
+
+```{r}
+anova(nmad_slope_plan1, nmad_slope_plan2)
+anova(nmad_slope_plan2, nmad_slope_plan3)
+anova(nmad_slope_plan1, nmad_slope_plan3)
+
+rmse(nmad_slope_max3)
+rmse(nmad_slope_plan3)
+
+# adding nmad_slope_plan3 leads to the smallest p-value
+
+
+```
+
+
+```{r}
+nmad_slope_prof1 <- lm(mad_elev_diff ~ cen_slope, data = stor_mad_slope_prof, weights = count)
+summary(nmad_slope_prof1)
+
+nmad_slope_prof2 <- lm(mad_elev_diff ~ cen_slope + I(cen_slope ^ 2), data = stor_mad_slope_prof, weights = count)
+summary(nmad_slope_prof2)
+
+nmad_slope_prof3 <- lm(mad_elev_diff ~ cen_slope + I(cen_slope ^ 2) + I(cen_slope ^ 3), data = stor_mad_slope_prof, weights = count)
+summary(nmad_slope_prof3)
+
+#nmad_slope_prof3 has the biggest rsquare value
+
+
+```
+
+```{r}
+anova(nmad_slope_prof1, nmad_slope_prof2)
+anova(nmad_slope_prof2, nmad_slope_prof3)
+anova(nmad_slope_prof1, nmad_slope_prof3)
+
+rmse(nmad_slope_max3)
+rmse(nmad_slope_plan3)
+rmse(nmad_slope_prof3)
+
+# adding nmad_slope_plan3 leads to the smallest p-value
+
+
+```
+
+```{r}
+nmad_slope_and_max1 <- lm(mad_elev_diff ~  polym(cen_slope, cen_max, degree=1, raw=TRUE), data = stor_mad_slope_max, weights = count)
+summary(nmad_slope_and_max1)
+
+nmad_slope_and_max2 <- lm(mad_elev_diff ~  polym(cen_slope, cen_max, degree=2, raw=TRUE), data = stor_mad_slope_max, weights = count)
+summary(nmad_slope_and_max2)
+
+nmad_slope_and_max3 <- lm(mad_elev_diff ~  polym(cen_slope, cen_max, degree=3, raw=TRUE), data = stor_mad_slope_max, weights = count)
+summary(nmad_slope_and_max3)
+
+# nmad_slope_and_max3 has the biggest r squared value out of the three
+
+```
+
+```{r}
+nmad_slope_and_plan1 <- lm(mad_elev_diff ~  polym(cen_slope, cen_plan, degree=1, raw=TRUE), data = stor_mad_slope_plan, weights = count)
+summary(nmad_slope_and_plan1)
+
+nmad_slope_and_plan2 <- lm(mad_elev_diff ~  polym(cen_slope, cen_plan, degree=2, raw=TRUE), data = stor_mad_slope_plan, weights = count)
+summary(nmad_slope_and_plan2)
+
+nmad_slope_and_plan3 <- lm(mad_elev_diff ~  polym(cen_slope, cen_plan, degree=3, raw=TRUE), data = stor_mad_slope_plan, weights = count)
+summary(nmad_slope_and_plan3)
+
+# nmad_slope_and_plan3 has the biggest r squared value out of the three
+
+```
+
+```{r}
+nmad_slope_and_prof1 <- lm(mad_elev_diff ~  polym(cen_slope, cen_prof, degree=1, raw=TRUE), data = stor_mad_slope_prof, weights = count)
+summary(nmad_slope_and_prof1)
+
+nmad_slope_and_prof2 <- lm(mad_elev_diff ~  polym(cen_slope, cen_prof, degree=2, raw=TRUE), data = stor_mad_slope_prof, weights = count)
+summary(nmad_slope_and_prof2)
+
+nmad_slope_and_prof3 <- lm(mad_elev_diff ~  polym(cen_slope, cen_prof, degree=3, raw=TRUE), data = stor_mad_slope_prof, weights = count)
+summary(nmad_slope_and_prof3)
+
+# nmad_slope_and_plan3 has the biggest r squared value out of the three
+
+```
+
+```{r}
+rmse(nmad_slope_and_max3)
+rmse(nmad_slope_and_plan3)
+rmse(nmad_slope_and_prof3)
+
+```
+
+
+```{r}
+anova(nmad_slope_max3, nmad_slope_and_max3)
+anova(nmad_slope_plan3, nmad_slope_and_plan3)
+anova(nmad_slope_prof3, nmad_slope_and_prof3)
+
+summary(nmad_slope_and_max3) #0.342
+summary(nmad_slope_and_plan3) #0.422
+summary(nmad_slope_and_prof3) # 0.395
+
+```
+
+
+
+
+```{r}
+nmad_slope_plan_prof1 <- lm(mad_elev_diff ~ cen_slope, data = stor_mad_slope_plan_prof, weights = count)
+summary(nmad_slope_plan_prof1)
+
+nmad_slope_plan_prof2 <- lm(mad_elev_diff ~ cen_slope + I(cen_slope ^ 2), data = stor_mad_slope_plan_prof, weights = count)
+summary(nmad_slope_plan_prof2)
+
+nmad_slope_plan_prof3 <- lm(mad_elev_diff ~ cen_slope + I(cen_slope ^ 2) + I(cen_slope ^ 3), data = stor_mad_slope_plan_prof, weights = count)
+summary(nmad_slope_plan_prof3)
+
+```
+
+```{r}
+nmad_slope_plus_plan_and_prof1 <- lm(mad_elev_diff ~ polym(cen_slope, cen_plan, cen_prof, degree=1, raw=TRUE), data = stor_mad_slope_plan_prof, weights = count)
+summary(nmad_slope_plus_plan_and_prof1)
+
+nmad_slope_plus_plan_and_prof2 <- lm(mad_elev_diff ~ polym(cen_slope, cen_plan, cen_prof, degree=2, raw=TRUE), data = stor_mad_slope_plan_prof, weights = count)
+summary(nmad_slope_plus_plan_and_prof2)
+
+nmad_slope_plus_plan_and_prof3 <- lm(mad_elev_diff ~ polym(cen_slope, cen_plan, cen_prof, degree=3, raw=TRUE), data = stor_mad_slope_plan_prof, weights = count)
+summary(nmad_slope_plus_plan_and_prof3)
+
+```
+
+```{r}
+summary(nmad_slope_plan_prof3)
+summary(nmad_slope_plus_plan_and_prof3)
+
+anova(nmad_slope_plan_prof3, nmad_slope_plus_plan_and_prof3)
+
+
+```
+
+
+```{r}
+nmad_slope_max_plan1 <- lm(mad_elev_diff ~ cen_slope, data = stor_mad_slope_max_plan, weights = count)
+summary(nmad_slope_max_plan1)
+
+nmad_slope_max_plan2 <- lm(mad_elev_diff ~ cen_slope + I(cen_slope ^ 2), data = stor_mad_slope_max_plan, weights = count)
+summary(nmad_slope_max_plan2)
+
+nmad_slope_max_plan3 <- lm(mad_elev_diff ~ cen_slope + I(cen_slope ^ 2) + I(cen_slope ^ 3), data = stor_mad_slope_max_plan, weights = count)
+summary(nmad_slope_max_plan3)
+
+
+```
+
+```{r}
+nmad_slope_plus_max_and_plan1 <- lm(mad_elev_diff ~ polym(cen_slope, cen_max, cen_plan, degree=1, raw=TRUE), data = stor_mad_slope_max_plan, weights = count)
+summary(nmad_slope_plus_max_and_plan1)
+
+nmad_slope_plus_max_and_plan2 <- lm(mad_elev_diff ~ polym(cen_slope, cen_max, cen_plan, degree=2, raw=TRUE), data = stor_mad_slope_max_plan, weights = count)
+summary(nmad_slope_plus_max_and_plan2)
+
+nmad_slope_plus_max_and_plan3 <- lm(mad_elev_diff ~ polym(cen_slope, cen_max, cen_plan, degree=3, raw=TRUE), data = stor_mad_slope_max_plan, weights = count)
+summary(nmad_slope_plus_max_and_plan3)
+
+```
+
+```{r}
+summary(nmad_slope_max_plan3)
+summary(nmad_slope_plus_max_and_plan3)
+
+
+anova(nmad_slope_max_plan3, nmad_slope_plus_max_and_plan3)
+
+```
+
+```{r}
+stor_mad_slope_max %>% 
+  ggplot() +
+  geom_point(aes(x = cen_slope, y = mad_elev_diff), color = "brown") + 
+  geom_function(fun = function(cen_slope) predict(nmad_slope_max1, newdata = data.frame(cen_slope = cen_slope)), color = "red") + 
+  geom_function(fun = function(cen_slope) predict(nmad_slope_max2, newdata = data.frame(cen_slope = cen_slope)), color = "blue") + 
+  geom_function(fun = function(cen_slope) predict(nmad_slope_max3, newdata = data.frame(cen_slope = cen_slope)), color = "green") + 
+  geom_smooth(aes(x = cen_slope, y = mad_elev_diff), linetype = 2, color = "black", se = FALSE) +
+  scale_color_manual(values = c("red", "blue", "green"), 
+                     labels = c("Model 1", "Model 2", "Model 3")) +
+  labs(x = "Cen_Slope", y = "Mad_Elev_Diff", title = "Model Comparison") 
+```
+
+
+```{r}
+stor_mad_slope_plan %>% 
+  ggplot() +
+  geom_point(aes(x = cen_slope, y = mad_elev_diff), color = "brown") + 
+  geom_function(fun = function(cen_slope) predict(nmad_slope_plan1, newdata = data.frame(cen_slope = cen_slope)), color = "red") + 
+  geom_function(fun = function(cen_slope) predict(nmad_slope_plan2, newdata = data.frame(cen_slope = cen_slope)), color = "blue") + 
+  geom_function(fun = function(cen_slope) predict(nmad_slope_plan3, newdata = data.frame(cen_slope = cen_slope)), color = "green") + 
+  geom_smooth(aes(x = cen_slope, y = mad_elev_diff), linetype = 2, color = "black", se = FALSE) +
+  scale_color_manual(values = c("red", "blue", "green"), 
+                     labels = c("Model 1", "Model 2", "Model 3")) +
+  labs(x = "Cen_Slope", y = "Mad_Elev_Diff", title = "Model Comparison") 
+
+```
+
+
+
+```{r}
+stor_slope_maxcurv <- stor_no_outliers %>%
+  filter(max_curv < 5) %>% 
+  group_by(slope_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff),
+         med_slope = median(slope),
+         med_max = median(max_curv),
+         count = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max)) %>% 
+  mutate(cen_slope = med_slope - median(med_slope))
+
+
+
+
+ slope_max_mod <- lm(mad_elev_diff ~ polym(cen_slope, cen_max, degree = 3), data = stor_slope_maxcurv)
+
+summary(slope_max_mod)
+
+stor_no_out %>% 
+  mutate(max_curv = ifelse(max_curv > 5, 5, max_curv))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

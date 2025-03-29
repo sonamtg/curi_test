@@ -1,0 +1,276 @@
+---
+title: "Coreg_eda"
+output: html_document
+date: '2023-06-30'
+editor_options: 
+  chunk_output_type: console
+---
+```{r, message = FALSE}
+library(tidyverse)
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+library(sf)
+rwb <- colorRampPalette(c("red", "white", "blue"))(50) # color palette 
+
+stor_cor_glacier <- read_csv("data/stor_cor_glacier.csv")
+stor_slope_maxcurv <- read_csv("data/stor_slope_maxcurv.csv")
+stor_cor_df <- read_csv("data/stor_cor_df.csv")
+storglacier <- shapefile("data/Storglaciaren_Extents_2022/Storglaciaren_Extents_2022SEP.shp")
+nk_cor <- raster("data/nk_corr.tif") 
+```
+
+#Coreg
+```{r}
+#RASTER
+zoomed <- c(648000, 652000, 7535000, 7538000)
+nk_zoomed <- crop(nk_cor, extent(zoomed)) %>% trim()
+par(mfrow= c(1,1))
+plot(nk_zoomed, col = rwb, zlim = c(-15,15), main = "Co-registration using Nuth and Kaab method", xaxt = "n", yaxt = "n")  
+plot(storglacier, add = TRUE)
+
+#GGPLOT
+storglaciersf <- st_as_sf(storglacier, coords = c("x", "y"))
+
+stor_cor_df %>%
+  ggplot() + 
+  geom_raster(aes(x, y, fill = elev_diff)) +  
+  geom_sf(data = storglaciersf, fill = NA, color = "black") + #making the outline
+  scale_fill_gradient2(low = "#ca0020", mid = "white", high = "#0571b0",
+                       midpoint = 0, limits = c(-15, 15)) + 
+  theme_void() + 
+  labs(fill = "Elevation Difference") +
+  theme(plot.background = element_rect(fill = "darkgrey"),
+        legend.text = element_text(size = 12),   # Set the legend text size
+        legend.title = element_text(size = 18), # Set the legend title size 
+        legend.box.background = element_rect(fill = "darkgrey", color = "darkgrey")) +
+  xlim(c(648000, 652000)) +
+  ylim(c(7535000, 7538000)) 
+```
+
+#Interpolation
+```{r}
+fill_raster <- stor_cor_glacier %>% 
+  dplyr::select(x, y, filled_elev_diff) %>% 
+  rasterFromXYZ()
+rwb1 <- colorRampPalette(c("red", "white", "blue"))(50)
+
+par(mfrow= c(1,2))
+void_zoomed <- c(648200, 648800, 7536500, 7539000)
+stor_zoomed <- crop(nk_cor, extent(void_zoomed)) %>% trim()
+plot(stor_zoomed, col = rwb1, zlim = c(-15,15), 
+     main = "Before Interpolation", xaxt = "n", yaxt = "n")
+par(bg = "darkgray")
+interpolated_zoomed<- crop(fill_raster, extent(void_zoomed)) %>% trim()
+plot(interpolated_zoomed,  col = rwb1, zlim = c(-15,15), 
+     main = "After Interpolation", xaxt = "n", yaxt = "n", legend = FALSE)
+
+```
+
+#Heatmap & Z-score standardization
+```{r}
+# huggonet slope and max curvature plot 
+ggplot(data = stor_slope_maxcurv, aes(x = fct_reorder(slope_cut, med_slope), y = fct_reorder(max_curve_bin, cen_max), fill = mad_elev_diff)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "#ca0020", mid = "white", high = "#0571b0",
+                       midpoint = 0, limits = c(-15, 15)) +
+  labs(title = "Heatmap of slope and maximum curvature",
+       x = "Slope bin",
+       y = "Max curvature bin",
+       fill = "NMAD Elevation Difference") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10), 
+    panel.grid.major = element_blank(),  
+    panel.grid.minor = element_blank(),  
+    legend.position = "top",
+    plot.background = element_rect(fill = "darkgrey"),
+        legend.text = element_text(size = 10, angle = 45),   # Set the legend text size
+        legend.title = element_text(size = 18), # Set the legend title size 
+        legend.box.background = element_rect(fill = "darkgrey", color = "darkgrey")# Move legend to the right side of the plot
+  )
+# convert to raster
+stor_z_raster <- rasterFromXYZ(stor_cor_glacier)
+ 
+names(stor_z_raster) #our vairbales 
+
+pred_med <- stor_z_raster[[ "pred_med_elev_diff" ]] #selected detrending 
+pred_mad <- stor_z_raster[["pred_mad"]] # selecting standardization 
+z_score <- stor_z_raster[["z_score"]] # selecting standardization 
+ 
+plot(pred_med)
+plot(pred_mad)
+
+subset_extent3 <- c(650500,650700,7536500 , 7536680)
+par(mfrow = c(1,2), bg = "darkgray")
+plot(z_score, col = rwb, zlim = c(-15,15), xaxt = "n", yaxt = "n") 
+plot(storglacier, add = TRUE)
+plot(extent(subset_extent3), add = TRUE)
+ddemzoom_cropped <- crop(z_score, extent(subset_extent3))%>%
+  trim()
+plot(ddemzoom_cropped, main = "Standardized Elevation Diffrence", 
+     col = rwb, zlim = c(-15,15), 
+     xaxt = "n", yaxt = "n", legend = FALSE)
+```
+
+#Variogram (short & long)
+```{r}
+set.seed(1234)
+
+stor_cor_nona <- stor_cor_glacier %>% 
+  drop_na(z_score) #had to drop the z_score na because variogram function doesn't do too well with missing values
+
+# Take a random sample of size 5000
+popu_sample <- stor_cor_nona[sample(nrow(stor_cor_nona), size = 5000, replace = TRUE), ]
+
+stor.sf <- st_as_sf(popu_sample, coords = c("x", "y"))
+stor.sf
+
+stor.sf <- st_set_crs(stor.sf, st_crs(lidar_2m))
+stor.sf
+summary(stor.sf)
+vari_med1 <- variogram(z_score ~ 1 , data = stor.sf, width = 10, cutoff = 400) #? 10 or more or less?
+vari_med2 <- variogram(z_score ~ 1 , data = stor.sf, width = 100, cutoff = 2000) #? 10 or more or less?
+plot(vari_med1, main = "Spherical Semivariogram")
+plot(vari_med2, main = "Spherical Semivariogram")
+
+vari_med_fit <- fit.variogram(vari_med1, 
+                            vgm("Sph", psill = (0.38 - 0.015), nugget = 0.015, range = 200))
+
+vari_med_fit2 <- fit.variogram(vari_med2, 
+                            vgm("Sph", psill = (0.6 - 0.05), nugget = 0.05, range = 1000))
+#double check to see if we selected the right parameters 
+
+vari_med_fit
+vari_med_fit2
+
+#par(mfrow = c(1,2), bg = "darkgray")
+plot(vari_med1, model = vari_med_fit, main = "Short-Range Fitted Semivariogram")
+plot(vari_med2, model = vari_med_fit2, main = "Long-Range Fitted Semivariogram")
+
+```
+
+
+#Med and Mad plots
+```{r}
+#Setting up
+stor_no_outliers1 <- stor_cor_glacier %>% 
+  group_by(elev_cut) %>% 
+  mutate(med_with_outliers = median(elev_diff, na.rm = TRUE), 
+         mad_with_outliers = mad(elev_diff, na.rm = TRUE)) %>% 
+  mutate(uppest = med_with_outliers + mad_with_outliers*3) %>% 
+  mutate(lowest = med_with_outliers - mad_with_outliers*3) %>% 
+  filter(elev_diff <= uppest, elev_diff >= lowest) %>%
+  ungroup()  #### I just added this! Probably
+
+stor_cor_glacier %>% 
+  group_by(elev_cut) %>% 
+  summarise(count = n(),
+            na_count = sum(is.na(elev_diff)))
+
+elev_binned_stats <- stor_no_outliers1 %>% 
+  group_by(elev_cut) %>%
+  summarize(med = median(elev_diff),
+            mad = mad(elev_diff)) %>%
+  mutate(upper = med + 2*mad, 
+         lower = med - 2*mad) %>% 
+  mutate(elev_factor = as.factor(elev_cut))
+
+
+#trouble with the intervals not being in order
+#median of the slopes (fct_reorder by the median)
+slope_binned_stats <- stor_no_outliers1 %>% 
+  group_by(slope_cut)%>% 
+  summarize(med = median(elev_diff),
+            mad = mad(elev_diff)) %>%
+  mutate(upper = med + 2*mad, 
+         lower = med - 2*mad) %>% 
+  mutate(slope_factor = as.factor(slope_cut)) %>% 
+ mutate(slope_numeric = as.numeric(as.factor(slope_cut)))
+ 
+#trouble with the intervals not being in order
+#median of the slopes (fct_reorder by the median)
+
+
+maxcurve_binned_stats <- stor_no_outliers1 %>% 
+  group_by(max_curve_bin) %>% 
+  summarize(med = median(elev_diff_no_outliers),
+            mad = mad(elev_diff_no_outliers)) %>%
+  mutate(upper = med + 2*mad, 
+         lower = med - 2*mad) %>% 
+  mutate(max_curve_numeric = as.numeric(as.factor(max_curve_bin)))
+
+
+#Elev_diff vs elev
+stor_cor_glacier %>% 
+  ggplot() +
+  geom_boxplot(aes(x = elev_cut, y = elev_diff)) +
+  geom_smooth(data = elev_binned_stats, aes(x = as.numeric(elev_factor), y = upper, color = "mad*2"), se = FALSE) + 
+  geom_smooth(data = elev_binned_stats, aes(x = as.numeric(elev_factor), y = lower, color = "mad*2"), se = FALSE) + 
+  geom_smooth(data = elev_binned_stats, aes(x = as.numeric(elev_factor), y = med, color = "med"), se = FALSE) +
+  theme(axis.text.x = element_text(angle = 45, size = 15),
+        axis.text.y = element_text(size = 14),
+        axis.title = element_text(size = 15)
+        ) +
+  labs(y = "Elevation Difference",
+       x = "Elevation Intervals")
+
+#NMAD vs slope (not sure if correct)
+stor_slope_maxcurv %>% 
+  ggplot() +
+  geom_boxplot(aes(x = fct_reorder(slope_cut, med_slope), y = mad_elev_diff)) +
+  geom_smooth(data = slope_binned_stats, aes(x = slope_numeric, y = upper, color = "mad*2"), se = FALSE) + 
+  geom_smooth(data = slope_binned_stats, aes(x = slope_numeric, y = lower, color = "mad*2"), se= FALSE) + 
+  geom_smooth(data = slope_binned_stats, aes(x = slope_numeric, y = med, color = "med"), se = FALSE) +
+  theme(axis.text.x = element_text(angle = 45, size = 10),
+        axis.text.y = element_text(size = 12),
+        axis.title = element_text(size = 15)
+        ) +
+  labs(y = "NMAD",
+       x = "Slope Intervals")
+
+
+#A different approach
+
+
+
+
+
+
+
+
+#NMAD vs max_curv (not sure if correct)
+stor_slope_maxcurv %>% 
+  ggplot() +
+  geom_boxplot(aes(x = fct_reorder(max_curve_bin, med_max), y = mad_elev_diff)) +
+  geom_smooth(data = slope_binned_stats, aes(x = as.numeric(slope_cut), y = upper, color = "mad*2"), se = FALSE) + 
+  geom_smooth(data = slope_binned_stats, aes(x = as.numeric(slope_cut), y = lower, color = "mad*2"), se= FALSE) + 
+  geom_smooth(data = slope_binned_stats, aes(x = as.numeric(slope_cut), y = med, color = "med"), se = FALSE) +
+  theme(axis.text.x = element_text(angle = 45, size = 10),
+        axis.text.y = element_text(size = 12),
+        axis.title = element_text(size = 15)
+        ) +
+  labs(y = "NMAD",
+       x = "Max Curve Intervals")
+```
+
+```{r}
+#NMAD vs slope just using points and one line
+stor_slope_maxcurv %>% 
+  group_by(slope_cut) %>% 
+  mutate(mad_elev_diff = mean(mad_elev_diff)) %>%  
+  ggplot() +
+  geom_point(aes(x = fct_reorder(slope_cut, med_slope), y = mad_elev_diff)) +
+  geom_smooth(aes(x = as.numeric(as.factor(fct_reorder(slope_cut, med_slope))), y = mad_elev_diff), se = FALSE) +
+  theme(axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 12),
+        axis.title = element_text(size = 15)
+        ) +
+  labs(y = "NMAD",
+       x = "Slope Intervals")
+
+
+
+```
+

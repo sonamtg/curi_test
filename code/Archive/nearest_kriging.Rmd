@@ -1,0 +1,31 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, message = FALSE}
+library(tidyverse)
+library(sf)
+library(tmap)
+library(gstat)
+library(sp)
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+library(ggplot2)
+library(ggplotify)
+library(nngeo)
+install.packages("nngeo")
+
+
+
+rwb <- colorRampPalette(c("red", "white", "blue"))(50)
+
+stor_cor_glacier_n <- read_csv("data/stor_cor_glacier.csv") 
+lidar_2m <- raster("data/Tarfala_Lantmatriet_2015AUG21_2M.tif")
+```
+
+
+

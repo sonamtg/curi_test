@@ -1,0 +1,304 @@
+---
+title: "Variogram part 2"
+subtitle: "Removing Trend"
+author: "Laura Boehm Vock"
+date: "1/13/2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, message = FALSE}
+library(tidyverse)
+library(sf)
+library(tmap)
+library(gstat)
+library(sp)
+```
+
+# Example 1: Meuse Data
+
+We looked at these data last time. They show metal concentrations in soil samples from the Meuse river. We'll load the data and convert meuse into an sf object for analysis.
+
+Our previos markdown convereted meuse from a dataframe to an sp object to an sf object. 
+This example code will change it directly from a dataframe into an sf object! 
+Its good to know how to work with all three types of objects... but if you can get an object into an sf type with CRS attached, then you can do pretty much anything for Areal or Geostatistical analysis.
+
+
+```{r}
+data(meuse)
+class(meuse)
+head(meuse)
+
+meuse.sf <- st_as_sf(meuse, coords = c("x", "y"))
+meuse.sf
+
+meuse.sf <- st_set_crs(meuse.sf, CRS("+init=epsg:28992")) 
+meuse.sf
+st_crs(meuse.sf)
+```
+
+
+# Review from Last time!
+```{r}
+v.logz.emp <- variogram(log(zinc) ~ 1, meuse.sf)
+plot(v.logz.emp, main = "Empirical Semivariogram")
+
+v.logz.fit <- fit.variogram(v.logz.emp, 
+                            vgm("Sph", psill =0.6, nugget = 0.1, range = 1000))
+
+v.logz.fit
+
+plot(v.logz.emp, model = v.logz.fit, main = "Fitted Semivariogram")
+```
+
+
+- Exponential Semivariogram is a continuous function. Generally works fairly well. Interpretation makes sense... correlation expoenentially decreases as a function of distance.
+
+- Spherical semivariogram: Correlation is treated as EXACTLY 0 for distances greater than the range. Can be helpful for computation with really really large datasets.
+
+- Matern Semivariogram: Most flexible. Has an extra parameter, kappa, which controls the precise shape.
+
+
+Why do we care about the semivariogram?
+
+- Used in kriging (spatial prediction)
+
+- For estimating standard errors ***more on this later***
+
+
+**Note:** "Sill" is the total height of the semivariogram.
+
+"Sill" = "Partial Sill" + "Nugget"
+
+Partial sill is reported in the variogram output:
+
+```{r}
+v.logz.fit
+```
+
+## More options with Semivariogram
+
+The epirical semivariogram is fit by BINNING the data. So we can choose the binwidth!
+
+* Experiment with width!!!
+```{r}
+v.logz.emp2 <- variogram(log(zinc) ~ 1, meuse.sf, width = 50)
+plot(v.logz.emp2, main = "Empirical Semivariogram")
+```
+
+The default is to divide into 15 bins. 
+
+Smaller binwidths can be better, but we want to be sure that there are at least 30 pairs in every bin. We also want to be sure that we have the binwidth small enough to capture the local scale variation.
+
+Here we can see that we have 50 or more pairs in all bins but 1, so this is probably just fine. The `np` column tells you the number of pairs.
+```{r}
+head(v.logz.emp2)
+hist(v.logz.emp2$np)
+
+# print, sorted by np
+v.logz.emp2 %>%
+  arrange(np) %>%
+  head()
+
+v.logz.fit2 <- fit.variogram(v.logz.emp2, 
+                            vgm("Sph", psill =0.6, nugget = 0.1, range = 1000))
+
+v.logz.fit2
+v.logz.fit
+
+plot(v.logz.emp2, model = v.logz.fit2, main = "Fitted Semivariogram")
+```
+
+As we can see, in this example, our fit is pretty similar with different binwidths. Great!!
+
+## Modeling Spatial Trend
+
+Our assumptions in fitting the semivariogram thus far have been:
+
+* Stationarity - the underlying data process is the same everywhere. The location of the pair of points does not affect it's level of correlation. 
+
+- FIRST ORDER STATIONARITY is the assumption that the MEAN (or expected value) is the same across the entire area. This is often NOT the case. 
+
+- SECOND ORDER STATIONARITY is the assumption that the VARIANCE and CORRELATION structure is the same across the entire area. This is often a reasonable assumption (and if its not, there are methods to address it).
+
+We will often create a model for the mean (linear regression) and then find the semivariogram of the residuals. First Order Stationarity is reasonable for the residuals because the mean/expected value is 0 everywhere. We can check for second order stationarity by looking at local semivariograms (more tomorrow!)
+
+
+* Isotropy - The direction between pairs of points doesn't matter. (More on this one tomorrow!)
+
+```{r}
+meuse.sf <- meuse.sf %>% mutate(logzinc = log(zinc))
+tmap_mode("view")
+tm_basemap()+
+tm_shape(meuse.sf) + 
+  tm_dots("logzinc")
+
+ggplot(meuse.sf, aes(x = dist.m, y = logzinc)) + 
+  geom_point() +
+  title(x = "Distance to Meuse River (m)") + 
+  geom_smooth(method = "lm", se = FALSE)
+```
+
+
+
+Two ways to do it: 
+
+Method 1: Fit model, create residuals, and fit variogram to residuals
+- Create residuals
+```{r}
+# Fit regression model
+lm.distm <- lm(logzinc ~ dist.m, data= meuse.sf)
+# Examine standard regression output
+summary(lm.distm)
+# Look at residual plots to assess regression assumptions
+par(mfrow=c(2,2))
+plot(lm.distm)
+par(mfrow=c(1,1))
+
+# add residuals as column (Variable) to dataset (sf object)
+# Note: this can get weird with missing data!
+meuse.sf$resid <- residuals(lm.distm)
+tmap_mode("plot")
+tm_shape(meuse.sf) + 
+  tm_dots("resid", size = 1)
+```
+- Fit variogram to residuals
+```{r}
+v.resid.emp <- variogram(resid ~ 1, meuse.sf, width = 50)
+plot(v.resid.emp)
+
+v.resid.fit <- fit.variogram(v.resid.emp, vgm("Sph"))
+v.resid.fit
+plot(v.resid.emp, model = v.resid.fit)
+```
+
+
+Method 2: model directly in variogram
+
+This is shorter, but the disadvantage is we don't get to actually look at how well the model is fitting, check regression assumptions, or plot the residuals on the map.
+```{r}
+v.model.emp <- variogram(logzinc ~ dist.m, meuse.sf, width = 50)
+v.model.fit <- fit.variogram(v.model.emp, vgm("Sph"))
+v.model.fit
+plot(v.model.emp, model = v.model.fit)
+```
+
+Compare our variogram from the original logzinc and from our modeled logzinc:
+```{r}
+v.logz.fit2
+v.resid.fit
+```
+
+What parameter estimates have change? Why?
+
+
+Interpretation of sill values
+
+Sill (Total sill) = variance of logzinc if we only had locations which were far enough apart to be independent. 
+
+should be a little bigger than var(logzinc)
+```{r}
+0.0471 +0.598
+var(meuse.sf$logzinc)
+```
+
+```{r}
+0.074 +0.201
+
+1-0.275/0.645
+```
+
+# Example 2: Snow data
+
+We did all this before, but run this chunk anyway:
+```{r}
+snow <- read_csv("https://www.ncdc.noaa.gov/snow-and-ice/daily-snow/MN-snowfall-202112.csv", skip = 1)
+head(snow)
+
+snow2 <- snow %>% 
+  mutate(total_dec11 = parse_number(`Dec 11`)) %>%
+  dplyr::select(Longitude, Latitude, `Station Name`, County, Elevation, total_dec11) %>%
+  rename(Station_Name = `Station Name`)
+
+snow.sf <- st_as_sf(snow2, coords = c("Longitude", "Latitude"))
+snow.sf <-st_set_crs(snow.sf, value = 4269) # Sets to NAD83, a common projection used by federal data
+
+# Can also set it this way:
+## snow.sf2 <- st_set_crs(snow.sf2, CRS("+init=epsg:4269"))
+
+# Filter out the missing values:
+snow.sf2 <- snow.sf %>%
+  filter(!is.na(total_dec11))
+
+tmap_mode("view")
+tm_basemap() +
+tm_shape(snow.sf2) +
+  tm_dots("total_dec11", palette = "Blues", title = "Depth (inches)") + 
+  tm_layout(title = "Snowfall in MN on Dec 11, 2021")
+```
+
+We see there is a clear trend, but we don't have any good explanatory variables to use. 
+
+We can use the X-Y coordinates to *detrend* the data. 
+
+```{r}
+colnames(snow.sf2)
+# Add the X and Ycoordinates as columns to the dataset.
+snowXY <- as.data.frame(st_coordinates(snow.sf2))
+head(snowXY)
+
+snow.sf2$X <- snowXY$X
+snow.sf2$Y <- snowXY$Y
+
+colnames(snow.sf2)
+
+ggplot(snow.sf2, aes(x= X, y = total_dec11)) + 
+  geom_point()+
+  geom_smooth()
+
+ggplot(snow.sf2, aes(x= Y, y = total_dec11)) + 
+  geom_point()+
+  geom_smooth()
+```
+
+We can fit a 1 degree or 2 degree polynomial.
+```{r}
+snow.poly1 <- lm(total_dec11 ~ X + Y ,data = snow.sf2)
+
+snow.poly2 <- lm(total_dec11 ~ X + Y +I(X^2) + I(Y^2) + X*Y,data = snow.sf2)
+
+summary(snow.poly1)
+summary(snow.poly2)
+
+anova(snow.poly2, snow.poly1)
+```
+
+Your turn: 
+* Add the residuals as a column to snow.sf2.
+* Plot the residuals using tmap
+* Fit a variogram to the residuals
+
+```{r}
+meuse.sf$resid <- residuals(lm.distm)
+tmap_mode("plot")
+tm_shape(meuse.sf) + 
+  tm_dots("resid", size = 1)
+```
+
+```{r}
+snow.sf2$resid <- residuals(snow.poly2)
+tmap_mode("plot")
+tm_shape(snow.sf2) + 
+  tm_dots("resid", size = 1)
+v.snowresid.emp <- variogram(resid ~ 1, data= snow.sf2, width = 3)
+hist(v.snowresid.emp$np)
+v.snowresid.fit <- fit.variogram(v.snowresid.emp, vgm("Sph"))
+plot(v.snowresid.emp, model = v.snowresid.fit)
+v.snowresid.fit
+```
+
+
+Extra time? 
+Return to the Meuse dataset. See if other variables are useful for predicting logzinc! 
+Or you can choose a different metal and try modeling and fitting a variogram.

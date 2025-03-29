@@ -1,0 +1,191 @@
+---
+title: "Open and View Storglaciaren"
+author: "Laura Boehm Vock"
+date: "2023-05-22"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, message = FALSE}
+library(tidyverse)
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+library(sf)
+library(tibble)
+install.packages("yaml")
+
+rwb <- colorRampPalette(c("red", "white", "blue"))(50)
+```
+
+```{r}
+setwd("~/curi_2023_storglaciaren")
+
+# 2015 data
+lidar_2m <- raster("data/Tarfala_Lantmatriet_2015AUG21_2M.tif")
+
+# 2022 data
+uav_2m_utm <- raster("data/storglaciaren_2022_sept_uav_2m_SWEREF99_TM.tif")
+
+# glacier outline in 2022
+storglacier <- shapefile("data/Storglaciaren_Extents_2022/Storglaciaren_Extents_2022SEP.shp")
+
+
+
+lidar_2m
+uav_2m_utm
+storglacier
+
+plot(lidar_2m, col= magma(64), main = "2015" )
+plot(storglacier, add = TRUE)
+
+plot(uav_2m_utm, col = magma(64), main = "2022")
+plot(storglacier, add = TRUE)
+
+
+```
+
+In order to take the difference, we need to be sure the two grids align with each other. 
+This process is called *resampling*. 
+Read about it here: 
+https://desktop.arcgis.com/en/arcmap/latest/extensions/spatial-analyst/performing-analysis/cell-size-and-resampling-in-analysis.htm
+
+
+```{r}
+diff <- resample(uav_2m_utm, lidar_2m) - lidar_2m
+```
+
+```{r, eval = FALSE}
+# See help menu for resample function
+?resample
+```
+
+
+Plot of differences: (Note: try plotting with and without the trim function)
+```{r}
+plot(trim(diff), col = rwb)
+plot(storglacier, add = TRUE)
+```
+
+As you can see above, the differences are around 30m, even off the glacier, where there should be no change. 
+There is some sort of issue with calibration that we will deal with more in depth later.
+
+
+The "mask" function will mask out the glacier. Using cellStats, we then calculate the median difference in elevation in the "off glacier" area. 
+```{r}
+mask(diff, storglacier, inverse = TRUE) %>% cellStats(stat = median)
+```
+
+
+```{r}
+diff_adj <- diff - 31.28
+
+plot(trim(diff_adj), col = rwb, zlim = c(-15, 15))
+plot(storglacier, add = TRUE)
+```
+
+
+We can look at the slope and aspect as well. 
+By default these are both measured in radians
+A bit more about aspect here https://gisgeography.com/aspect-map/
+and slope here https://pro.arcgis.com/en/pro-app/latest/tool-reference/spatial-analyst/how-slope-works.htm
+
+Together, we can use slope and aspect to draw a "hillShade" which helps us to visualize the topography.
+```{r}
+stor_terrain <- terrain(lidar_2m, c("slope", "aspect"))
+stor_hillShade <- hillShade(stor_terrain$slope, stor_terrain$aspect)
+
+# in this plot I convert slope from radians to degrees
+plot(stor_terrain$slope*180/pi, col = colorRampPalette(c("white", "red"))(64), main = "slope (deg)")
+plot(storglacier, add = TRUE)
+
+plot(stor_hillShade, col = grey((1:64)/64), main = "Hillshade")
+plot(storglacier, add = TRUE)
+
+
+plot(stor_hillShade, col = grey((1:64)/64), main = "Hillshade +Elevation", legend = FALSE)
+plot(lidar_2m, col = magma(13), alpha = 0.4, add =TRUE)
+plot(storglacier, add=TRUE)
+```
+
+
+```{r}
+names(diff) <- "diff"
+names(diff_adj) <- "diff_adj"
+names(lidar_2m) <- "elev"
+
+#This will create a glacier indicator
+blank <- lidar_2m
+values(blank) <- 1
+stor_mask <- mask(blank, storglacier) 
+names(stor_mask) <- "is.glacier"
+
+
+stor_stack <- stack(lidar_2m, diff, diff_adj, stor_terrain, stor_mask)
+
+stor_df <- stor_stack %>% 
+  as.data.frame(xy = TRUE) %>%
+  as_tibble() %>%
+  mutate(is.glacier = ifelse(is.na(is.glacier), 0, 1))
+
+
+stor_df
+
+summary(stor_df)
+
+
+stor_na <- stor_df %>% 
+  drop_na() %>% 
+  mutate(is.glacier = as.factor(is.glacier))
+
+stor_na <- stor_df %>% 
+  drop_na() %>% 
+  mutate(is.glacier = as.factor(is.glacier))
+```
+
+You can now look at summary stats and plots to see the relationship between diff_adj and elevation, slope, and aspect on and off glacier!!!
+
+
+# PYTHON
+## Set up python to use Xdem
+```{r}
+setwd("C:/Users/boehm/curi_2023_storglaciaren/code") 
+setwd("/Users/boehm") 
+library(reticulate)
+virtualenv_create("storglaciaren")
+use_virtualenv("storglaciaren")
+py_install("opencv-contrib-python", envname = "storglaciaren")
+py_install("xdem", envname ="storglaciaren")
+```
+
+```{python}
+#import opencv-contrib-python
+import geoutils as gu
+import matplotlib.pyplot as plt 
+import numpy as np
+import xdem
+import pandas as pd
+```
+
+```{python}
+lidar_dem = xdem.DEM("Sweden_Landmateriet_DEM_2015/Tarfala_Lantmatriet_2015AUG21_2M.tif")
+print(lidar_dem)
+
+plan_curvature = xdem.terrain.planform_curvature(lidar_dem)
+prof_curvature = xdem.terrain.profile_curvature(lidar_dem)
+
+plan_curvature.show(cmap = "RdGy_r", vmin = -1, vmax = 1)
+prof_curvature.show(cmap = "RdGy_r", vmin = -1, vmax = 1)
+
+# plan_curvature.save("Sweden_Landmateriet_DEM_2015/lidar_plan_curv.tif")
+# prof_curvature.save("Sweden_Landmateriet_DEM_2015/lidar_prof_curv.tif")
+```
+
+```{r}
+plan_curv <- raster("Sweden_Landmateriet_DEM_2015/lidar_plan_curv.tif")
+prof_curv <- raster("Sweden_Landmateriet_DEM_2015/lidar_prof_curv.tif")
+```
+
+
