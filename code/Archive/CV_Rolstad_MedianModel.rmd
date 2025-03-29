@@ -1,0 +1,644 @@
+---
+title: "Coreg_eda"
+output: html_document
+date: '2023-06-30'
+editor_options: 
+  chunk_output_type: console
+---
+
+#This rmd serves as a building block for the models we will make to identify the z-score, which is (elevation difference - predicted median) / predicted nmad. Refer to Cv_Rol_MedModel2.rmd for a more clean version of this, or you can head straight to the z_score.rmd
+
+```{r, message = FALSE}
+library(tidyverse)
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+library(ggplot2)
+library(ggplotify)
+rwb <- colorRampPalette(c("red", "white", "blue"))(50)
+
+stor_no_outliers <- read_csv("data/stor_no_outliers.csv") #glacier only w/ outliers removed
+```
+
+
+#Elevation & Curve to Median
+```{r}
+#Making a dataset for the plots below
+stor_no_out_plot <- stor_no_outliers %>% 
+  group_by(elev_cut, plan_curve_bin, prof_curve_bin,max_curve_bin,slope_cut) %>% 
+  mutate(med = median(elev_diff)) %>% 
+  mutate(upper = med + mad(elev_diff)*2) %>% 
+  mutate(lower = med - mad(elev_diff)*2) %>% 
+  mutate(mad = mad(elev_diff)) 
+
+
+#Making plots to see if the following variables effect the median of elevation difference
+
+#Elevation (med appears to be affected by elev)
+stor_no_out_plot %>%
+  ggplot() +
+  geom_boxplot(aes(x = elev_cut, y = med))
+
+#Curve plan
+stor_no_out_plot %>%
+  ggplot() +
+  geom_boxplot(aes(x = plan_curve_bin, y = med))
+
+#Curve prof
+stor_no_out_plot %>%
+  ggplot() +
+  geom_boxplot(aes(x = prof_curve_bin, y = med))
+
+#Curve max
+stor_no_out_plot %>%
+  ggplot() +
+  geom_boxplot(aes(x = max_curve_bin, y = med))
+
+#Curve max
+stor_no_out_plot %>% 
+  ggplot() +
+  geom_boxplot(aes(x = northness_cut, y = med)) +
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 8)
+        )
+
+#Curve max
+stor_no_out_plot %>%
+  ggplot() +
+  geom_boxplot(aes(x = eastness_cut, y = med)) +
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 8)
+        )
+```
+
+
+# NMAD EDA
+
+# elev_diff and slope using bins
+```{r}
+stor_no_out_plot %>% 
+  group_by(slope_cut) %>% 
+  summarize(mad_elev_diff = mad(elev_diff)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = slope_cut, y = mad_elev_diff)) +
+  geom_point() +
+  scale_y_continuous(limit = c(0,4))+
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 8)
+        )
+
+#change scale so that we can look at all of them together 
+```
+
+# elev_diff and curvature using bins
+```{r}
+stor_no_out_plot %>% 
+  group_by(plan_curve_bin) %>% 
+  summarize(mad_elev_diff = mad(elev_diff)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = plan_curve_bin, y = mad_elev_diff)) +
+  geom_point() +
+  scale_y_continuous(limit = c(0,4))+
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 8)
+        )
+stor_no_out_plot %>% 
+  group_by(prof_curve_bin) %>% 
+  summarize(mad_elev_diff = mad(elev_diff)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = prof_curve_bin, y = mad_elev_diff)) +
+  geom_point() +
+  scale_y_continuous(limit = c(0,4))+
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 8)
+        )
+
+stor_no_out_plot %>% 
+  group_by(max_curve_bin) %>% 
+  summarize(mad_elev_diff = mad(elev_diff)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = max_curve_bin, y = mad_elev_diff)) +
+  geom_point() +
+  scale_y_continuous(limit = c(0,4))+
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 8)
+        )
+```
+
+# elevation difference and elevation cut
+```{r}
+stor_no_out_plot %>% 
+  group_by(elev_cut) %>% 
+  summarize(mad_elev_diff = mad(elev_diff)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = elev_cut, y = mad_elev_diff)) +
+  geom_point() +
+  scale_y_continuous(limit = c(0,4))+
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 8)
+        )
+
+```
+
+# aspect (northness and eastness)
+
+```{r}
+stor_no_out_plot %>% 
+  group_by(northness_cut) %>% 
+  summarize(mad_elev_diff = mad(elev_diff)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = northness_cut, y = mad_elev_diff)) +
+  geom_point() +
+  scale_y_continuous(limit = c(0,4))+
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 8)
+                )
+
+stor_no_out_plot %>% 
+  group_by(eastness_cut) %>% 
+  summarize(mad_elev_diff = mad(elev_diff)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = eastness_cut, y = mad_elev_diff)) +
+  geom_point() +
+  scale_y_continuous(limit = c(0,4))+
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 8)
+                )
+```
+
+
+#Cleaning Set up
+```{r}
+stor_no_outliers <- stor_no_outliers %>% 
+     mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+            upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+          med_elev_cut = (lower_elev + upper_elev) / 2,
+          cen_elev_med = med_elev_cut - median(med_elev_cut)) %>% 
+     mutate(lower_slope = as.numeric(gsub("\\((.*),.*\\]", "\\1", slope_cut)),
+            upper_slope = as.numeric(gsub(".*,(.*)\\]", "\\1", slope_cut)),
+          med_slope_cut = (lower_slope + upper_slope) / 2,
+          cen_slope_med = med_slope_cut - median(med_slope_cut)) %>% 
+     mutate(lower_plan = as.numeric(gsub("\\((.*),.*\\]", "\\1", plan_curve_bin)),
+            upper_plan = as.numeric(gsub(".*,(.*)\\]", "\\1", plan_curve_bin)),
+            med_plan_cut = (lower_plan + upper_plan) / 2,
+            cen_plan_med = med_plan_cut - median(med_plan_cut)) %>% 
+     mutate(lower_prof = ifelse(prof_curve_bin == "[0,0.2]",
+                                0,
+            as.numeric(gsub("\\((.*),.*\\]", "\\1", prof_curve_bin))),
+         upper_prof = ifelse(prof_curve_bin == "[0,0.2]",
+                                0.2,
+            as.numeric(gsub(".*,(.*)\\]", "\\1", prof_curve_bin))),
+          med_prof_cut = (lower_prof + upper_prof) / 2,
+          cen_prof_med = med_prof_cut - median(med_prof_cut)) %>% 
+     mutate(lower_max = as.numeric(gsub("\\((.*),.*\\]", "\\1", max_curve_bin)),
+          upper_max = as.numeric(gsub(".*,(.*)\\]", "\\1", max_curve_bin)),
+          med_max_cut = (lower_max + upper_max) / 2,
+          cen_max_med = med_max_cut - median(med_max_cut))
+
+summary(stor_no_outliers$lower_prof)
+
+
+stor_med_mad <- stor_no_outliers %>% 
+  group_by(elev_cut, slope_cut) %>% 
+  #Do two group by at a time, and switch it out to figure out which variable are important and should be included
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff), 
+         count = n()) %>% 
+  ungroup() %>% 
+     mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+            upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+          med_elev_cut = (lower_elev + upper_elev) / 2,
+          cen_elev_med = med_elev_cut - median(med_elev_cut)) %>% 
+     mutate(lower_slope = as.numeric(gsub("\\((.*),.*\\]", "\\1", slope_cut)),
+            upper_slope = as.numeric(gsub(".*,(.*)\\]", "\\1", slope_cut)),
+          med_slope_cut = (lower_slope + upper_slope) / 2,
+          cen_slope_med = med_slope_cut - median(med_slope_cut)) 
+
+
+stor_med_mad1 <- stor_no_outliers %>% 
+  group_by(elev_cut, plan_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff), 
+         count = n()) %>% #median for the curve
+  ungroup() %>% 
+     mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+            upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+          med_elev_cut = (lower_elev + upper_elev) / 2,
+          cen_elev_med = med_elev_cut - median(med_elev_cut)) %>% 
+     mutate(lower_plan = as.numeric(gsub("\\((.*),.*\\]", "\\1", plan_curve_bin)),
+            upper_plan = as.numeric(gsub(".*,(.*)\\]", "\\1", plan_curve_bin)),
+            med_plan_cut = (lower_plan + upper_plan) / 2, 
+            cen_plan_med = med_plan_cut - median(med_plan_cut)) #The median of the values; Cut_number for all other variables except elev; When plotting, size = count
+
+
+stor_med_mad2 <- stor_no_outliers %>% 
+  group_by(elev_cut, prof_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff), 
+         count = n()) %>% 
+  ungroup() %>% 
+     mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+            upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+          med_elev_cut = (lower_elev + upper_elev) / 2,
+          cen_elev_med = med_elev_cut - median(med_elev_cut)) %>% 
+     mutate(lower_prof = ifelse(prof_curve_bin == "[0,0.2]",
+                                0,
+            as.numeric(gsub("\\((.*),.*\\]", "\\1", prof_curve_bin))),
+         upper_prof = ifelse(prof_curve_bin == "[0,0.2]",
+                                0.2,
+            as.numeric(gsub(".*,(.*)\\]", "\\1", prof_curve_bin))),
+          med_prof_cut = (lower_prof + upper_prof) / 2,
+          cen_prof_med = med_prof_cut - median(med_prof_cut)) 
+
+
+
+stor_med_mad3 <- stor_no_outliers %>% 
+  group_by(elev_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff), 
+         count = n()) %>% 
+  ungroup() %>% 
+     mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+            upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+          med_elev_cut = (lower_elev + upper_elev) / 2,
+          cen_elev_med = med_elev_cut - median(med_elev_cut)) %>% 
+     mutate(lower_max = as.numeric(gsub("\\((.*),.*\\]", "\\1", max_curve_bin)),
+          upper_max = as.numeric(gsub(".*,(.*)\\]", "\\1", max_curve_bin)),
+          med_max_cut = (lower_max + upper_max) / 2,
+          cen_max_med = med_max_cut - median(med_max_cut))
+
+
+stor_med_mad4 <- stor_no_outliers %>% 
+  group_by(elev_cut, slope_cut, plan_curve_bin ) %>% 
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff), 
+         count = n()) %>% 
+  ungroup() %>% 
+     mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+            upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+          med_elev_cut = (lower_elev + upper_elev) / 2,
+          cen_elev_med = med_elev_cut - median(med_elev_cut)) %>% 
+     mutate(lower_slope = as.numeric(gsub("\\((.*),.*\\]", "\\1", slope_cut)),
+            upper_slope = as.numeric(gsub(".*,(.*)\\]", "\\1", slope_cut)),
+          med_slope_cut = (lower_slope + upper_slope) / 2,
+          cen_slope_med = med_slope_cut - median(med_slope_cut)) %>% 
+     mutate(lower_plan = as.numeric(gsub("\\((.*),.*\\]", "\\1", plan_curve_bin)),
+            upper_plan = as.numeric(gsub(".*,(.*)\\]", "\\1", plan_curve_bin)),
+            med_plan_cut = (lower_plan + upper_plan) / 2,
+            cen_plan_med = med_plan_cut - median(med_plan_cut)) 
+
+
+
+stor_med_mad5 <- stor_no_outliers %>% 
+  group_by(elev_cut, slope_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff), 
+         count = n()) %>% 
+  ungroup() %>% 
+     mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+            upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+          med_elev_cut = (lower_elev + upper_elev) / 2,
+          cen_elev_med = med_elev_cut - median(med_elev_cut)) %>% 
+     mutate(lower_slope = as.numeric(gsub("\\((.*),.*\\]", "\\1", slope_cut)),
+            upper_slope = as.numeric(gsub(".*,(.*)\\]", "\\1", slope_cut)),
+          med_slope_cut = (lower_slope + upper_slope) / 2,
+          cen_slope_med = med_slope_cut - median(med_slope_cut)) %>% 
+      mutate(lower_max = as.numeric(gsub("\\((.*),.*\\]", "\\1", max_curve_bin)),
+          upper_max = as.numeric(gsub(".*,(.*)\\]", "\\1", max_curve_bin)),
+          med_max_cut = (lower_max + upper_max) / 2,
+          cen_max_med = med_max_cut - median(med_max_cut))
+
+
+stor_med_mad6 <- stor_no_outliers %>% 
+  group_by(elev_cut, slope_cut, max_curve_bin, plan_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff), 
+         count = n()) %>% 
+  ungroup() %>% 
+     mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+            upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+          med_elev_cut = (lower_elev + upper_elev) / 2,
+          cen_elev_med = med_elev_cut - median(med_elev_cut)) %>% 
+     mutate(lower_slope = as.numeric(gsub("\\((.*),.*\\]", "\\1", slope_cut)),
+            upper_slope = as.numeric(gsub(".*,(.*)\\]", "\\1", slope_cut)),
+          med_slope_cut = (lower_slope + upper_slope) / 2,
+          cen_slope_med = med_slope_cut - median(med_slope_cut)) %>% 
+      mutate(lower_max = as.numeric(gsub("\\((.*),.*\\]", "\\1", max_curve_bin)),
+          upper_max = as.numeric(gsub(".*,(.*)\\]", "\\1", max_curve_bin)),
+          med_max_cut = (lower_max + upper_max) / 2,
+          cen_max_med = med_max_cut - median(med_max_cut)) %>% 
+  mutate(lower_plan = as.numeric(gsub("\\((.*),.*\\]", "\\1", plan_curve_bin)),
+            upper_plan = as.numeric(gsub(".*,(.*)\\]", "\\1", plan_curve_bin)),
+            med_plan_cut = (lower_plan + upper_plan) / 2,
+            cen_plan_med = med_plan_cut - median(med_plan_cut)) 
+
+
+
+
+
+sapply(lapply(stor_med_mad, unique), length)
+
+            
+
+stor_med_mad_test <- stor_no_outliers %>% 
+  group_by(elev_cut, slope_cut)%>%
+  #Do two group by at a time, and switch it out to figure out which variable are important and should be included
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff), 
+         count = n()) %>% 
+     mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+            upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+          med_elev_cut = (lower_elev + upper_elev) / 2,
+          cen_elev_med = med_elev_cut - 1425)%>%
+  mutate(lower_slope = as.numeric(gsub("\\((.*),.*\\]", "\\1", slope_cut)),
+        upper_slope = as.numeric(gsub(".*,(.*)\\]", "\\1", slope_cut)),
+          med_slope_cut = (lower_slope + upper_slope) / 2,
+        cen_slope_med = med_slope_cut - 7.5)
+
+
+
+
+
+
+
+sapply(lapply(test, unique), length)
+
+summary(stor_med_mad$count)
+
+
+#plot for northness and eastness 
+stor_no_outliers %>% 
+  ggplot() +
+  geom_smooth(aes(x=northness, y=elev_diff))
+
+stor_no_outliers %>% 
+  ggplot() +
+  geom_raster(aes(x=x, y=y, fill=aspect_degrees))#double check the hill shade #aspect_degrees, try and use rainbow colors
+  #positive (light) means true, ie: east; negative (dark) is the opposite
+
+
+# mutate(lower_northness = as.numeric(gsub("\\((.*),.*\\]", "\\1", northness_cut)),
+  #        upper_northness = as.numeric(gsub(".*,(.*)\\]", "\\1", northness_cut)),
+  #        med_northness_cut = (lower_aspect + upper_aspect) / 2) %>% 
+  # mutate(cen_northness_med = med_aspect_cut - median(med_aspect_cut))
+
+sapply(lapply(stor_med_mad, unique), length)
+```
+
+#Models
+```{r}
+# making model for MED (Poly)
+#Third Order (from the reading that looked at RMSE)
+
+#Slope (possibly)
+med_model3 <- lm(med_elev_diff ~ polym(cen_elev_med, degree=3, raw=TRUE), data = stor_med_mad, weights = count)
+summary(med_model3)
+
+stor_med_mad$residuals3 <- residuals(med_model3)
+
+med_model3.1 <- lm(med_elev_diff ~ polym(cen_elev_med, cen_slope_med, degree=3, raw=TRUE), data = stor_med_mad, weights = count)
+summary(med_model3.1)
+stor_med_mad$residuals3.1 <- residuals(med_model3.1)
+
+stor_med_mad %>% 
+  ggplot() +
+  geom_point(aes(x = cen_slope_med, y = residuals3)) +
+  geom_smooth(aes(x = cen_slope_med, y = residuals3)) #Slope is not significant and important to be added. Check out Northness, Eastness, plan_curve_bin, prof_curve_bin, max_curve_bin...maybe aspect_cut if needed.
+
+#Partial F-test (Nested Models)
+anova(med_model3, med_model3.1)
+
+
+#PLan_Curve (f-test says we should add)
+med_model4 <- lm(med_elev_diff ~ polym(cen_elev_med, degree=3, raw=TRUE), data = stor_med_mad1, weights = count)
+summary(med_model4)
+residuals4 <- residuals(med_model4)
+
+med_model4.1 <- lm(med_elev_diff ~ polym(cen_elev_med, cen_plan_med, degree=3, raw=TRUE), data = stor_med_mad1, weights = count)
+summary(med_model4.1)
+
+stor_med_mad1 %>% 
+  ggplot() +
+  geom_point(aes(x = cen_plan_med, y = residuals4)) +
+  geom_smooth(aes(x = cen_plan_med, y = residuals4))
+
+anova(med_model4, med_model4.1)
+
+#Prof_curve (Not significant)
+med_model5 <- lm(med_elev_diff ~ polym(cen_elev_med, degree=3, raw=TRUE), data = stor_med_mad2, weights = count)
+summary(med_model5)
+residuals5 <- residuals(med_model5)
+
+med_model5.1 <- lm(med_elev_diff ~ polym(cen_elev_med, cen_prof_med, degree=3, raw=TRUE), data = stor_med_mad2, weights = count)
+summary(med_model5.1)
+
+anova(med_model5, med_model5.1)
+
+stor_med_mad2 %>% 
+  ggplot() +
+  geom_point(aes(x = cen_prof_med, y = residuals5)) +
+  geom_smooth(aes(x = cen_prof_med, y = residuals5))
+
+
+
+#Max_curve 
+med_model6 <- lm(med_elev_diff ~ polym(cen_elev_med, degree=3, raw=TRUE), data = stor_med_mad3, weights = count)
+summary(med_model6)
+residuals6 <- residuals(med_model6)
+
+med_model6.1 <- lm(med_elev_diff ~ polym(cen_elev_med, cen_max_med,degree=3, raw=TRUE), data = stor_med_mad3, weights = count)
+summary(med_model6.1)
+residuals6.1 <- residuals(med_model6.1)
+
+anova(med_model6, med_model6.1)
+
+stor_med_mad3 %>% 
+  ggplot() +
+  geom_point(aes(x = cen_max_med, y = residuals6)) +
+  geom_smooth(aes(x = cen_max_med, y = residuals6))
+
+#Slope_cut & PLan_curve
+med_model3.1 <- lm(med_elev_diff ~ polym(cen_elev_med, cen_slope_med, degree=3, raw=TRUE), data = stor_med_mad4, weights = count)
+summary(med_model3.1)
+stor_med_mad4$residuals3.1 <- residuals(med_model3.1)
+
+med_model3.2 <- lm(med_elev_diff ~ polym(cen_elev_med, cen_slope_med, cen_plan_med, degree=3, raw=TRUE), data = stor_med_mad4, weights = count)
+summary(med_model3.2)
+stor_med_mad4$residuals3.2 <- residuals(med_model3.2)
+
+stor_med_mad4 %>% 
+  ggplot() +
+  geom_point(aes(x = cen_plan_med, y = residuals3.1)) +
+  geom_smooth(aes(x = cen_plan_med, y = residuals3.1))
+
+anova(med_model3.1, med_model3.2)
+
+#Max Curve and Slope cut
+
+med_model6.1 <- lm(med_elev_diff ~ polym(cen_elev_med, cen_max_med, degree=3, raw=TRUE), data = stor_med_mad5, weights = count)
+summary(med_model6.1)
+residuals6.1 <- residuals(med_model6.1)
+
+
+med_model6.2 <- lm(med_elev_diff ~ polym(cen_elev_med, cen_max_med,cen_slope_med,degree=3, raw=TRUE), data = stor_med_mad5, weights = count)
+summary(med_model6.2)
+residuals6.2 <- residuals(med_model6.2)
+
+anova(med_model6.1, med_model6.2)
+
+stor_med_mad5 %>% 
+  ggplot() +
+  geom_point(aes(x = cen_slope_med, y = residuals6.1)) +
+  geom_smooth(aes(x = cen_slope_med, y = residuals6.1))
+
+
+
+#Slope_cut, max_curve, plan_curve
+med_model6.21 <- lm(med_elev_diff ~ polym(cen_elev_med, cen_max_med, cen_slope_med, degree=3, raw=TRUE), data = stor_med_mad6, weights = count)
+summary(med_model6.21)
+residuals6.21 <- residuals(med_model6.21)
+
+med_model6.3 <- lm(med_elev_diff ~ polym(cen_elev_med, cen_max_med, cen_slope_med, cen_plan_med, degree=3, raw=TRUE), data = stor_med_mad6, weights = count)
+summary(med_model6.3)
+residuals6.3 <- residuals(med_model6.3)
+
+anova(med_model6.21, med_model6.3)
+
+stor_med_mad6 %>% 
+  ggplot() +
+  geom_point(aes(x = cen_plan_med, y = residuals6.21)) +
+  geom_smooth(aes(x = cen_plan_med, y = residuals6.21))
+
+#Comparing Models
+
+
+
+stor_med_mad5$residuals6.2 <- residuals(med_model6.2)
+
+
+med_model3.21 <- lm(med_elev_diff ~ polym(cen_elev_med, cen_slope_med, cen_plan_med, degree=3, raw=TRUE), data = stor_med_mad6, weights = count)
+summary(med_model3.21)
+stor_med_mad6$residuals3.21 <- residuals(med_model3.21)
+
+med_model6.31 <- lm(med_elev_diff ~ polym(cen_elev_med, cen_slope_med, cen_max_med, degree=3, raw=TRUE), data = stor_med_mad6, weights = count)
+summary(med_model6.31)
+stor_med_mad6$residuals6.31 <- residuals(med_model6.31)
+
+anova(med_model3.21,med_model6.31)
+
+sqrt(mean(stor_med_mad6$residuals3.21^2)) #2.08
+sqrt(mean(stor_med_mad6$residuals6.31^2)) #1.98: this is better in terms of RMSE & R^squared
+
+```
+
+#Residuals
+```{r}
+# Obtain the residuals
+residuals <- residuals(med_model2)
+
+
+#Will use this dataset to conduct some EDA 
+stor_med_mad$residuals <- residuals
+
+
+
+#predicting for Med for every point
+pred_med_elev_diff <- predict(med_model2, newdata = stor_no_outliers)
+
+stor_no_outliers$pred_med_elev_diff <- pred_med_elev_diff
+```
+
+
+
+#Z-Score
+```{r}
+stor_z <- stor_no_outliers %>% 
+  mutate(z_score = (elev_diff - pred_med_elev_diff) / predicted_nmad)
+
+stor_z %>% 
+  select(z_score)
+
+# PLots 
+
+    #raster plots
+stor_z_raster <- rasterFromXYZ(stor_z) %>% 
+  ungroup() %>% 
+  dplyr::select(x,y,z_score)
+
+   # geom plots 
+stor_z %>% 
+  group_by(elev_cut) %>% 
+  summarize(med_z_score = median(z_score)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = elev_cut, y = med_z_score)) +
+  geom_point()
+
+stor_z %>% 
+  ggplot(aes(x = elev_cut, y = z_score)) +
+  geom_boxplot() +
+  scale_y_continuous(limits = c(-5, 5))
+
+stor_z %>% 
+  ggplot(aes(x = aspect_cut, y = z_score)) +
+  geom_boxplot() +
+  scale_y_continuous(limits = c(-50, 50))
+```
+
+```{r}
+stor_z <- write_csv(stor_z, "data/stor_z.csv")
+stor_residuals <- write_csv(stor_med_mad, "data/stor_residuals.csv")
+```
+
+
+#Residual Plots EDA
+```{r}
+#Plot the residuals against the fitted values
+plot(med_model2,1)
+
+plot(fitted(med_model2), residuals,
+     xlab = "Fitted Values",
+     ylab = "Residuals",
+     main = "Residuals vs. Fitted Values")
+
+stor_med_mad %>% 
+  ggplot(aes(elev_cut, residuals))+
+  geom_boxplot()
+
+stor_med_mad %>% 
+  ggplot(aes(slope_cut, residuals))+
+  geom_boxplot()
+
+stor_med_mad %>% 
+  ggplot(aes(aspect_cut, residuals))+
+  geom_boxplot()
+
+stor_med_mad %>% 
+  ggplot(aes(cen_elev_med, residuals))+
+  geom_point()
+
+stor_med_mad %>% 
+  ggplot(aes(cen_slope_med, residuals))+
+  geom_point()
+
+stor_med_mad %>% 
+  ggplot(aes(cen_aspect_med, residuals))+
+  geom_point()
+
+
+```
+ 
+#Residual Model
+```{r}
+#Build a model w/ only cen_elev_med, then find residual, then make a model off of the residual, then residual vs slope; Same as the interpolation model, so use center median of each variable for plotting
+res_model1 <- lm(residuals ~ 0 + elev_cut + slope_cut + aspect_cut, data = stor_med_mad)
+summary(res_model1)
+
+res_model1.1 <- lm(residuals ~ 0 + cen_elev_med + cen_slope_med + cen_aspect_med, data = stor_med_mad)
+summary(res_model1.1)
+
+# res_model2 <- lm(residuals ~ polym(cen_elev_med, cen_slope_med, cen_aspect_med ,degree=2, raw=TRUE), data = stor_med_mad, weights = count)
+# 
+# res_model2
+```
+

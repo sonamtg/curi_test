@@ -1,0 +1,343 @@
+---
+title: "Coreg_eda"
+output:
+  pdf_document: default
+  html_document: default
+date: '2023-06-30'
+editor_options:
+  chunk_output_type: console
+---
+```{r, include = FALSE}
+library(tidyverse) 
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+rwb <- colorRampPalette(c("red", "white", "blue"))(50) # color palette 
+
+```
+
+
+After you are done with this, follow the numeric order. Meaning, look for any rmd that has 2nd, 3rd, 4th, etc.
+
+
+# data 
+```{r, include=FALSE}
+setwd("/home/rstudio/users/gurung2/curi_test")
+# coregistered data
+nk_cor <- raster("data/nk_corr.tif") #coreg raster pulled from github we used nuth and kaab open source to code on phyton. 
+pipe_cor <- raster("data/pipe.tif") #coreg raster pulled from github we used nuth and kaab open source to code on phyton this includes nuth and kaab, icp and bias correction. 
+icp <- raster("data/icp.tif") #coreg raster pulled from github we used nuth and kaab open source to code on phyton this includes icp only. 
+lidar_2m <- raster("data/Tarfala_Lantmatriet_2015AUG21_2M.tif") #2015 data 
+plan_curv <- raster("data/lidar_plan_curv.tif") # plan curvature 
+max_curv <- raster("data/lidar_max_curv.tif") # max curvature 
+prof_curv <- raster("data/lidar_prof_curv.tif") # prof curvature
+uav_2m_utm <- raster("data/storglaciaren_2022_sept_uav_2m_SWEREF99_TM.tif") #2022 data 
+storglacier <- shapefile("data/Storglaciaren_Extents_2022/Storglaciaren_Extents_2022SEP.shp") #outline of 2022
+stor_cor_df <- read_csv("data/stor_cor_df.csv") # data frame after coreg 
+
+```
+
+#plot after coreg by subextent 
+
+```{r}
+#nuth and kaab 
+
+pdf("~co-registration plot using nuth and kaab.pdf", width = 6.5, height = 4)
+
+plot(trim(nk_cor), col = rwb, zlim = c(-20,20), main = "Co-registration using Nuth and Kaab method")  
+plot(storglacier, add = TRUE)
+dev.off()
+
+
+pdf("~subextent651250, 651500, 7535900, 7536050.pdf", width = 6.5, height = 4)
+subset_extent1 <- c(651250, 651500, 7535900, 7536050)
+par(mfrow= c(1,2))
+plot(trim(nk_cor), col = rwb, zlim = c(-15,15))
+plot(extent(subset_extent1), add = TRUE)
+ddemzoom_cropped <- crop(nk_cor, extent(subset_extent1))%>%
+  trim()
+plot(ddemzoom_cropped, main = "Co-reg",  col = rwb, zlim = c(-2.5,2.5))
+
+dev.off()
+
+
+pdf("~subextent649500,650000,7536800 , 7536850.pdf", width = 6.5, height = 4)
+subset_extent2 <-c(649500,650000,7536800 , 7536850)
+par(mfrow= c(1,2))
+plot(trim(nk_cor), col = rwb, zlim = c(-15,15),  main = "Co-registration using Nuth and Kaab method") 
+plot(extent(subset_extent2), add = TRUE)
+ddemzoom_cropped <- crop(nk_cor, extent(subset_extent2))%>%
+  trim()
+plot(ddemzoom_cropped, main = "Cor",  col = rwb, zlim = c(-2.5,2.5))
+
+dev.off()
+
+
+pdf("~subextent651000,651500,7536500 , 7536850.pdf", width = 6.5, height = 4)
+subset_extent4 <- c(651000,651500,7536500 , 7536850)
+par(mfrow= c(1,2))
+plot(trim(nk_cor), col = rwb, zlim = c(-15,15),  main = "Nuth and Kaab Co-registration") 
+plot(extent(subset_extent4), add = TRUE)
+ddemzoom_cropped <- crop(nk_cor, extent(subset_extent4))%>%
+  trim()
+plot(ddemzoom_cropped,  col = rwb, zlim = c(-2.5,2.5))
+dev.off()
+```
+
+```{r}
+
+# hillshade plot 
+stor_terrain <- terrain(lidar_2m, c("slope", "aspect"))
+stor_hillShade <- hillShade(stor_terrain$slope, stor_terrain$aspect)
+
+pdf("~hillshade subextent651000,651500,7536500 , 7536850.pdf", width = 6.5, height = 4)
+subset_extent4 <- c(651000,651500,7536500 , 7536850)
+par(mfrow= c(1,2))
+plot(trim(stor_hillShade), col = grey((1:64)/64), main = "Hillshade")
+plot(extent(subset_extent4), add = TRUE)
+ddemzoom_cropped <- crop(stor_hillShade, extent(subset_extent4))%>%
+  trim()
+plot(ddemzoom_cropped,  col = grey((1:64)/64))
+dev.off()
+
+
+
+    # plot before coreg 
+
+#diff <- resample(uav_2m_utm, lidar_2m) - lidar_2m
+#plot(trim(diff), main = "Before Co-registration")
+#plot(storglacier, add = TRUE)
+
+#ddemzoom_cropped_diff <- crop(diff - 31.8, extent(subset_extent))%>%
+#  trim()
+#plot(ddemzoom_cropped_diff, main = "Before", col = rwb, zlim = c(-2.5,2.5))
+
+
+
+
+# pipe coreg
+#plot(trim(pipe_cor), zlim = c(-15, 15))
+#plot(storglacier, add = TRUE)
+
+
+# icp coreg 
+#plot(trim(icp), zlim = c(-15, 15))
+#plot(storglacier, add = TRUE)
+
+
+#stor_terrain <- terrain(lidar_2m, c("slope", "aspect"))
+#stor_hillShade <- hillShade(stor_terrain$slope, stor_terrain$aspect)
+
+# in this plot I convert slope from radians to degrees
+#plot(stor_terrain$slope*180/pi, col = colorRampPalette(c("white", "red"))(64), main = "slope (deg)")
+#plot(storglacier, add = TRUE)
+
+#plot(stor_hillShade, col = grey((1:64)/64), main = "Hillshade")
+#plot(storglacier, add = TRUE)
+
+
+#plot(stor_hillShade, col = grey((1:64)/64), main = "Hillshade +Elevation", legend = FALSE)
+#plot(lidar_2m, col = magma(13), alpha = 0.4, add =TRUE)
+#plot(storglacier, add=TRUE)
+
+```
+
+
+# data frame set up for stor_cor_df 
+
+```{r}
+# # outlier removal after correction 
+# # nuth and kaab 
+# names(nk_cor) <- "elev_diff"
+# names(lidar_2m) <- "elev"
+# blank <- nk_cor
+# values(blank) <- 1
+# stor_mask <- mask(blank, storglacier) 
+# names(stor_mask) <- "is.glacier"
+# 
+# stor_stack <- stack(lidar_2m, plan_curv, max_curv, prof_curv,nk_cor, stor_mask,stor_terrain)
+# 
+# stor_cor_df <- stor_stack %>% 
+#   as.data.frame(xy = TRUE) %>%
+#   as_tibble() %>%
+#   mutate(is.glacier = ifelse(is.na(is.glacier), 0, 1))
+# 
+# write_csv(stor_cor_df, "data/stor_cor_df.csv")
+
+```
+
+
+
+```{r}
+# LBV TEST
+
+stor_cor_df %>% 
+  mutate(elev_cut = cut_width(elev, width = 50, center = 1325, dig.lab = 4)) %>%  mutate(slope_degrees = (as.numeric(slope)*180)/pi) %>% 
+  group_by(elev_cut) %>% 
+  mutate(med_with_outliers = median(elev_diff, na.rm = TRUE), 
+         mad_with_outliers = mad(elev_diff, na.rm = TRUE)) %>% 
+  mutate(uppest = med_with_outliers + mad_with_outliers*3) %>% 
+  mutate(lowest = med_with_outliers - mad_with_outliers*3) %>% 
+  mutate(elev_diff_no_outliers = ifelse(elev_diff <= uppest & elev_diff >= lowest, elev_diff, NA)) %>% # making the outliers NA
+  ungroup() %>%  #### I just added this! Probably
+  mutate(aspect_degrees = (as.numeric(aspect)*180)/pi) %>% 
+  mutate(northness = cos(aspect),
+         eastness = sin(aspect)) %>% 
+  mutate(aspect_cut = cut_width(aspect_degrees, width = 10, center = 25),
+         northness_cut = cut_number(northness, n = 10),
+         eastness_cut = cut_number(eastness, n = 10)) %>% 
+  mutate(slope_cut = cut_number(slope_degrees, 15)) %>%
+  count(slope_cut) 
+
+
+stor_cor_df %>% 
+  mutate(elev_cut = cut_width(elev, width = 50, center = 1325, dig.lab = 4)) %>%  mutate(slope_degrees = (as.numeric(slope)*180)/pi) %>% 
+  group_by(elev_cut) %>% 
+  mutate(med_with_outliers = median(elev_diff, na.rm = TRUE), 
+         mad_with_outliers = mad(elev_diff, na.rm = TRUE)) %>% 
+  mutate(uppest = med_with_outliers + mad_with_outliers*3) %>% 
+  mutate(lowest = med_with_outliers - mad_with_outliers*3) %>% 
+  mutate(elev_diff_no_outliers = ifelse(elev_diff <= uppest & elev_diff >= lowest, elev_diff, NA)) %>% # making the outliers NA
+  ungroup() %>%  #### I just added this! Probably
+  drop_na(elev_diff_no_outliers) %>%
+  mutate(aspect_degrees = (as.numeric(aspect)*180)/pi) %>% 
+  mutate(northness = cos(aspect),
+         eastness = sin(aspect)) %>% 
+  mutate(aspect_cut = cut_width(aspect_degrees, width = 10, center = 25),
+         northness_cut = cut_number(northness, n = 10),
+         eastness_cut = cut_number(eastness, n = 10)) %>% 
+  mutate(slope_cut = cut_number(slope_degrees, 15)) %>%
+  count(slope_cut)
+
+
+stor_cor_df %>% 
+  mutate(elev_cut = cut_width(elev, width = 50, center = 1325, dig.lab = 4)) %>%  mutate(slope_degrees = (as.numeric(slope)*180)/pi) %>% 
+  group_by(elev_cut) %>% 
+  mutate(med_with_outliers = median(elev_diff, na.rm = TRUE), 
+         mad_with_outliers = mad(elev_diff, na.rm = TRUE)) %>% 
+  mutate(uppest = med_with_outliers + mad_with_outliers*3) %>% 
+  mutate(lowest = med_with_outliers - mad_with_outliers*3) %>% 
+  mutate(elev_diff_no_outliers = ifelse(elev_diff <= uppest & elev_diff >= lowest, elev_diff, NA),
+         steep = ifelse(slope_degrees > 25, "steep", "not")) %>%
+  group_by(steep) %>%
+  summarize(n = n(),
+            missing = sum(is.na(elev_diff)),
+            outliers = sum(is.na(elev_diff_no_outliers)) - missing,
+            prop_outliers = outliers/(n - missing))
+```
+
+# Instead of removing outliers like in stor_no_outliers, for the streamlined dataset, we are just adding columns
+```{r}
+#stor_cor_glacier <- stor_cor_df %>% 
+ # mutate(elev_cut = cut_width(elev, width = 50, center = 1325, dig.lab = 4)) %>%  
+  #mutate(slope_degrees = (as.numeric(slope)*180)/pi) %>% 
+  #group_by(elev_cut) %>% 
+  #mutate(med_with_outliers = median(elev_diff, na.rm = TRUE), 
+   #      mad_with_outliers = mad(elev_diff, na.rm = TRUE)) %>% 
+  #mutate(uppest = med_with_outliers + mad_with_outliers*3) %>% 
+  #mutate(lowest = med_with_outliers - mad_with_outliers*3) %>% 
+  #mutate(elev_diff_no_outliers = ifelse(elev_diff <= uppest & elev_diff >= lowest, elev_diff, NA)) %>% # making the outliers NA
+  #ungroup() %>%  #### I just added this! Probably
+  #mutate(aspect_degrees = (as.numeric(aspect)*180)/pi) %>% 
+  #mutate(northness = cos(aspect),
+    #     eastness = sin(aspect)) %>% 
+  #mutate(aspect_cut = cut_width(aspect_degrees, width = 10, center = 25),
+   #      northness_cut = cut_number(northness, n = 10),
+    #     eastness_cut = cut_number(eastness, n = 10)) %>% 
+  #mutate(slope_cut = cut_number(slope_degrees, 15)) %>% 
+  #filter(abs(lidar_max_curv) < 5 | abs(lidar_plan_curv) < 5 | abs(lidar_prof_curv))
+  #filter(is.glacier == 1) %>% 
+  #mutate(max_curv = abs(lidar_max_curv),
+   #      plan_curv = abs(lidar_plan_curv),
+    #     prof_curv = abs(lidar_prof_curv)) %>% 
+  #mutate(plan_curve_bin = cut_number(plan_curv, n = 15)) %>%
+  #mutate(prof_curve_bin = cut_number(prof_curv, n = 15)) %>%
+  #mutate(max_curve_bin = cut_number(max_curv, n = 15)) #abs(curve) comes from hugonnet
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# random stuff (plots, looking at bins)
+```{r}
+# 
+# # elev_diff <- c(stor_no_outliers$elev_diff)
+# # 
+# # medians <- apply(stor_no_outliers, 1, function(row) median([7]))
+# # stor_no_outliers$med_elev_diff <- medians
+# 
+# 
+# # mad_elev <- "h"
+# # test <- tibble(mad_elev)
+# # 
+# # mad(elev_diff)
+# # 
+# # stor_no_outliers$mad_elev_diff <- mad(elev_diff)
+# # 
+# # 
+# 
+#   
+# 
+# summary(stor_no_outliers$northness_cut)
+# summary(stor_no_outliers$plan_curve_bin)
+# summary(stor_no_outliers$prof_curve_bin)
+# summary(stor_no_outliers$max_curve_bin)
+# 
+# elev_binned_stats <- stor_no_outliers %>% 
+#   group_by(elev_cut) %>%
+#   summarize(med = median(elev_diff),
+#             mad = mad(elev_diff)) %>%
+#   mutate(upper = med + 2*mad, 
+#          lower = med - 2*mad)
+# 
+# summary(stor_no_outliers$lidar_prof_curv) #quantile()
+# quantile(stor_no_outliers$lidar_max_curv, c(.01,.99)) #outliers are anything plus or minus 5; bin everything that is bigger than 5 together, make the other bins smaller
+# quantile(stor_no_outliers$lidar_plan_curv, c(.01,.99))
+# quantile(stor_no_outliers$lidar_prof_curv, c(.01,.99))
+# 
+# 
+# #plot 
+# 
+# stor_no_outliers %>% 
+#   ggplot() +
+#   geom_boxplot(aes(x = elev_cut, y = elev_diff)) +
+#   geom_smooth(data = elev_binned_stats, aes(x = as.numeric(elev_cut), y = upper, color = "mad*2"), se = FALSE) + 
+#     geom_smooth(data = elev_binned_stats, aes(x = as.numeric(elev_cut), y = lower, color = "mad*2"), se= FALSE) + 
+#   geom_smooth(data = elev_binned_stats, aes(x = as.numeric(elev_cut), y = med, color = "med"), se = FALSE) +
+#   theme(axis.text.x = element_text(angle = 45, size = 10),
+#         axis.text.y = element_text(size = 12),
+#         axis.title = element_text(size = 15)
+#         ) +
+#   labs(y = "Elevation Difference",
+#        x = "Elevation Interval")
+
+stor_slope_maxcurv %>% 
+  ggplot(aes(x = slope_cut, y = max_curve_bin, size = ct)) +
+  geom_point()
+```
+
+
+
+
+
+```{r}
+#stor_cor_glacier <- write_csv(stor_cor_glacier, "data/stor_cor_glacier.csv")
+```
+
+
+

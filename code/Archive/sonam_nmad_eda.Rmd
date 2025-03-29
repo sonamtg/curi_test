@@ -1,0 +1,439 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r, message = FALSE}
+library(tidyverse)
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+library(ModelMetrics)
+rwb <- colorRampPalette(c("red", "white", "blue"))(50)
+
+stor_no_outliers <- read_csv("~/curi_test/data/stor_no_outliers.csv")
+
+```
+
+
+# elev_diff and slope using bins
+```{r}
+stor_no_outliers %>% 
+  mutate(med = median(elev_diff)) %>% 
+  mutate(upper = med + mad(elev_diff)*2) %>% 
+  mutate(lower = med - mad(elev_diff)*2) %>% 
+  group_by(slope_cut) %>% 
+  summarize(mad_elev_diff = mad(elev_diff)) %>% 
+  ungroup() %>% 
+  ggplot() +
+  geom_point(aes(x = slope_cut, y = mad_elev_diff)) +
+  scale_y_continuous(limits = c(0, 4)) +
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 8)
+        )
+
+```
+
+# elev_diff and aspect using bins
+```{r}
+stor_no_outliers %>% 
+  group_by(northness_cut) %>% 
+  summarize(mad_elev_diff = mad(elev_diff)) %>% 
+  ungroup() %>% 
+  ggplot() +
+  geom_point(aes(x = northness_cut, y = mad_elev_diff)) +
+  scale_y_continuous(limits = c(0, 4)) +
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 8)
+        )
+```
+
+# elevation difference and elevation cut
+```{r}
+stor_no_outliers %>% 
+  group_by(elev_cut) %>% 
+  summarize(mad_elev_diff = mad(elev_diff)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = elev_cut, y = mad_elev_diff)) +
+  geom_point() +
+  scale_y_continuous(limits = c(0, 4)) +
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 8)
+        )
+
+```
+
+```{r}
+stor_med_mad_test_prof<- stor_no_outliers %>% 
+  group_by(slope_cut, prof_curve_bin)%>%
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff), 
+         count = n()) %>% 
+  # mutate(lower_plan = as.numeric(gsub("\\((.*),.*\\]", "\\1", plan_curve_bin)),
+  #            upper_plan = as.numeric(gsub(".*,(.*)\\]", "\\1", plan_curve_bin)),
+  #            med_plan_cut = (lower_plan + upper_plan) / 2,
+  #            cen_plan_med = med_plan_cut - 0.75) %>% 
+  mutate(lower_prof = ifelse(prof_curve_bin == "[0,0.2]",
+                                0,
+            as.numeric(gsub("\\((.*),.*\\]", "\\1", prof_curve_bin))),
+         upper_prof = ifelse(prof_curve_bin == "[0,0.2]",
+                                0.2,
+            as.numeric(gsub(".*,(.*)\\]", "\\1", prof_curve_bin))),
+          med_prof_cut = (lower_prof + upper_prof) / 2,
+          cen_prof_med = med_prof_cut - 0.75) %>% 
+  # mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+  #       upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+  #         med_elev_cut = (lower_elev + upper_elev) / 2,
+  #       cen_elev_med = med_elev_cut - 1425) %>% 
+  mutate(lower_slope = as.numeric(gsub("\\((.*),.*\\]", "\\1", slope_cut)),
+        upper_slope = as.numeric(gsub(".*,(.*)\\]", "\\1", slope_cut)),
+          med_slope_cut = (lower_slope + upper_slope) / 2,
+        cen_slope_med = med_slope_cut - 7.5)
+
+```
+
+
+```{r}
+stor_med_mad_test_plan <- stor_no_outliers %>% 
+  group_by(slope_cut, plan_curve_bin)%>%
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff), 
+         count = n()) %>% 
+  mutate(lower_plan = as.numeric(gsub("\\((.*),.*\\]", "\\1", plan_curve_bin)),
+              upper_plan = as.numeric(gsub(".*,(.*)\\]", "\\1", plan_curve_bin)),
+              med_plan_cut = (lower_plan + upper_plan) / 2,
+              cen_plan_med = med_plan_cut - 0.75) %>% 
+  # mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+  #       upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+  #         med_elev_cut = (lower_elev + upper_elev) / 2,
+  #       cen_elev_med = med_elev_cut - 1425) %>% 
+  mutate(lower_slope = as.numeric(gsub("\\((.*),.*\\]", "\\1", slope_cut)),
+        upper_slope = as.numeric(gsub(".*,(.*)\\]", "\\1", slope_cut)),
+          med_slope_cut = (lower_slope + upper_slope) / 2,
+        cen_slope_med = med_slope_cut - 7.5)
+
+```
+
+
+```{r}
+stor_med_mad_test_max <- stor_no_outliers %>% 
+  group_by(slope_cut, max_curve_bin)%>%
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff), 
+         count = n()) %>% 
+  mutate(lower_max = as.numeric(gsub("\\((.*),.*\\]", "\\1", max_curve_bin)),
+          upper_max = as.numeric(gsub(".*,(.*)\\]", "\\1", max_curve_bin)),
+          med_max_cut = (lower_max + upper_max) / 2,
+          cen_max_med = med_max_cut - 1.5) %>% 
+  mutate(lower_slope = as.numeric(gsub("\\((.*),.*\\]", "\\1", slope_cut)),
+        upper_slope = as.numeric(gsub(".*,(.*)\\]", "\\1", slope_cut)),
+          med_slope_cut = (lower_slope + upper_slope) / 2,
+        cen_slope_med = med_slope_cut - 7.5)
+
+```
+
+```{r}
+stor_med_mad_test_elev <- stor_no_outliers %>% 
+  group_by(slope_cut, elev_cut)%>%
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff), 
+         count = n()) %>% 
+  mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+         upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+         med_elev_cut = (lower_elev + upper_elev) / 2,
+         cen_elev_med = med_elev_cut - 1425) %>% 
+  mutate(lower_slope = as.numeric(gsub("\\((.*),.*\\]", "\\1", slope_cut)),
+        upper_slope = as.numeric(gsub(".*,(.*)\\]", "\\1", slope_cut)),
+          med_slope_cut = (lower_slope + upper_slope) / 2,
+        cen_slope_med = med_slope_cut - 7.5)
+
+```
+
+```{r}
+stor_med_mad_test <- stor_no_outliers %>% 
+  group_by(slope_cut)%>%
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff), 
+         count = n()) %>% 
+  mutate(lower_slope = as.numeric(gsub("\\((.*),.*\\]", "\\1", slope_cut)),
+        upper_slope = as.numeric(gsub(".*,(.*)\\]", "\\1", slope_cut)),
+          med_slope_cut = (lower_slope + upper_slope) / 2,
+        cen_slope_med = med_slope_cut - 7.5)
+
+```
+
+
+
+Creating a model with nmad elev_diff as the response variable 
+grouped by slope and plan curvature
+
+```{r}
+# make numeric and then, polynomial, create weights
+nmad_poly1 <- lm(mad_elev_diff ~ polym(cen_slope_med, cen_plan_med, degree=1, raw=TRUE), data = stor_med_mad_test_plan, weights = count)
+summary(nmad_poly1)
+
+nmad_poly2 <- lm(mad_elev_diff ~ polym(cen_slope_med, cen_plan_med, degree=2, raw=TRUE), data = stor_med_mad_test_plan, weights = count)
+summary(nmad_poly2)
+
+nmad_poly3 <- lm(mad_elev_diff ~ polym(cen_slope_med, cen_plan_med, degree=3, raw=TRUE), data = stor_med_mad_test_plan, weights = count)
+summary(nmad_poly3)
+
+```
+
+
+
+```{r}
+# make numeric and then, polynomial, create weights
+nmad_poly4 <- lm(mad_elev_diff ~ polym(cen_slope_med, cen_prof_med, degree=1, raw=TRUE), data = stor_med_mad_test_prof, weights = count)
+summary(nmad_poly4)
+
+nmad_poly5 <- lm(mad_elev_diff ~ polym(cen_slope_med, cen_prof_med, degree=2, raw=TRUE), data = stor_med_mad_test_prof, weights = count)
+summary(nmad_poly5)
+
+nmad_poly6 <- lm(mad_elev_diff ~ polym(cen_slope_med, cen_prof_med, degree=3 raw=TRUE), data = stor_med_mad_test_prof, weights = count)
+summary(nmad_poly6)
+```
+
+
+```{r}
+# make numeric and then, polynomial, create weights
+nmad_poly7 <- lm(mad_elev_diff ~ polym(cen_slope_med, cen_max_med, degree=1, raw=TRUE), data = stor_med_mad_test_max, weights = count)
+summary(nmad_poly7)
+
+nmad_poly8 <- lm(mad_elev_diff ~ polym(cen_slope_med, cen_max_med, degree=2, raw=TRUE), data = stor_med_mad_test_max, weights = count)
+summary(nmad_poly5)
+
+nmad_poly9 <- lm(mad_elev_diff ~ polym(cen_slope_med, cen_max_med, degree=3, raw=TRUE), data = stor_med_mad_test_max, weights = count)
+summary(nmad_poly6)
+```
+
+
+```{r}
+anova(nmad_poly1, nmad_poly2)
+anova(nmad_poly1, nmad_poly3)
+anova(nmad_poly2, nmad_poly3)
+# nmad_poly3 seems to be the lowest p-value
+
+```
+
+
+```{r}
+anova(nmad_poly4, nmad_poly5) # degree 1 and 2 after adding prof
+anova(nmad_poly5, nmad_poly6) # degree 2 and 3
+anova(nmad_poly4, nmad_poly6) # degree 1 and 3
+# nmad_poly5 seems to have the lowest p-value
+```
+
+```{r}
+anova(nmad_poly7, nmad_poly8) # degree 1 and 2 after adding prof
+anova(nmad_poly8, nmad_poly9) # degree 2 and 3
+anova(nmad_poly7, nmad_poly9) # degree 1 and 3
+# nmad_poly9 seems to have the lowest p-value
+```
+
+```{r}
+rmse(nmad_poly3)
+summary(nmad_poly3)
+
+rmse(nmad_poly5)
+summary(nmad_poly5)
+
+rmse(nmad_poly9)
+summary(nmad_poly9)
+```
+
+```{r}
+nmad_slope1 <- lm(mad_elev_diff ~ cen_slope_med, data = stor_med_mad_test, weights = count)
+summary(nmad_slope1)
+
+nmad_slope2 <- lm(mad_elev_diff ~ I(cen_slope_med) + I(cen_slope_med ^ 2), data = stor_med_mad_test, weights = count)
+summary(nmad_slope2)
+
+nmad_slope3 <- lm(mad_elev_diff ~ I(cen_slope_med) + I(cen_slope_med ^ 2) + I(cen_slope_med ^ 3), data = stor_med_mad_test, weights = count)
+summary(nmad_slope3)
+
+# cut_number, set the num of bins to 15, 
+
+```
+
+```{r}
+anova(nmad_slope1, nmad_slope2)
+anova(nmad_slope2, nmad_slope3)
+anova(nmad_slope1, nmad_slope3)
+
+rmse(nmad_slope1)
+rmse(nmad_slope2)
+rmse(nmad_slope3)
+
+```
+
+```{r}
+stor_med_mad_test_elev %>% 
+  ggplot(aes(x = cen_elev_med, y = residuals)) +
+  geom_point()
+
+```
+
+
+```{r}
+nmad_slope_elev1 <- lm(mad_elev_diff ~ polym(cen_slope_med, cen_max_med, degree=2, raw=TRUE), data = stor_med_mad_test_max, weights = count)
+summary(nmad_slope2)
+
+nmad_slope_elev2 <- lm(mad_elev_diff ~ I(cen_slope_med) + I(cen_slope_med ^ 2), data = stor_med_mad_test, weights = count)
+summary(nmad_slope2)
+
+nmad_slope_elev3 <- lm(mad_elev_diff ~ I(cen_slope_med) + I(cen_slope_med ^ 2) + I(cen_slope_med ^ 3), data = stor_med_mad_test, weights = count)
+summary(nmad_slope3)
+```
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+rmse(nmad_poly1)
+rmse(nmad_poly2)
+rmse(nmad_poly3)
+
+```
+
+# finding the residuals from nmad_poly1
+
+```{r}
+residuals <- residuals(nmad_slope1)
+
+
+stor_med_mad_test_elev$residuals <- residuals
+
+# verifying whether nmad_poly1 is the best one
+stor_med_mad_test_elev %>% 
+  ggplot(aes(x = cen_elev_med, y = residuals)) +
+  geom_point() +
+  scale_y_continuous(limits = c(-5, 5))
+
+# bin acc to slope, residuals 
+
+```
+
+```{r}
+stor_med_mad %>% 
+  ggplot() +
+  geom_point(aes(x = cen_slope_med, y = mad_elev_diff), color = "brown") + 
+  geom_function(fun = function(cen_slope_med) predict(nmad_poly1, newdata = data.frame(cen_slope_med = cen_slope_med)), color = "red") + 
+  geom_function(fun = function(cen_slope_med) predict(nmad_poly2, newdata = data.frame(cen_slope_med = cen_slope_med)), color = "blue") + 
+  geom_function(fun = function(cen_slope_med) predict(nmad_poly3, newdata = data.frame(cen_slope_med = cen_slope_med)), color = "green") + 
+  geom_smooth(aes(x = cen_slope_med, y = mad_elev_diff), linetype = 2, color = "black", se = FALSE) +
+  scale_color_manual(values = c("red", "blue", "green"), 
+                     labels = c("Model 1", "Model 2", "Model 3")) +
+  labs(x = "Cen_Slope_Med", y = "Mad_Elev_Diff", title = "Model Comparison") 
+```
+
+
+Predicting the NMAD for every point
+
+```{r}
+stor_no_outliers <- stor_no_outliers %>% 
+  mutate(cen_slope_med =  slope_degrees - 21.25)
+  
+predicted_nmad <- predict(nmad_poly1, newdata = stor_no_outliers)
+
+stor_no_outliers$predicted_nmad <- predicted_nmad
+
+predicted_nmad <- predicted_nmad %>% 
+  mutate(nmad = predict(nmad_model, newdata = predicted_nmad))
+
+```
+
+
+
+
+```{r}
+stor_z <- stor_no_outliers %>% 
+  mutate(z_score = (elev_diff - pred_med_elev_diff) / predicted_nmad)
+# use residuals forr just the slope and (slope and curvature)
+
+
+```
+
+
+```{r}
+stor_z %>% 
+  group_by(elev_cut) %>% 
+  summarize(med_z_score = median(z_score)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = elev_cut, y = med_z_score)) +
+  geom_point()
+
+```
+
+```{r}
+stor_z %>% 
+  ggplot(aes(x = elev_cut, y = z_score)) +
+  geom_boxplot() +
+  scale_y_continuous(limits = c(-5, 5))
+```
+
+```{r}
+stor_z %>% 
+  ggplot(aes(x = aspect_cut, y = z_score)) +
+  geom_boxplot() +
+  scale_y_continuous(limits = c(-50, 50))
+```
+
+
+```{r}
+hist(stor_no_outliers$lidar_max_curv)
+quantile(stor_no_outliers$lidar_max_curv, c(.01, .99))
+
+
+
+```
+
+
+```{r}
+stor_mad_slope_plan %>% 
+  ggplot() +
+  geom_point(aes(x = cen_slope, y = mad_elev_diff), color = "brown") + 
+  geom_function(fun = function(cen_slope) predict(nmad_slope_plan1, newdata = data.frame(cen_slope = cen_slope)), color = "red") + 
+  geom_function(fun = function(cen_slope) predict(nmad_slope_plan2, newdata = data.frame(cen_slope = cen_slope)), color = "blue") + 
+  geom_function(fun = function(cen_slope) predict(nmad_slope_plan3, newdata = data.frame(cen_slope = cen_slope)), color = "green") + 
+  geom_smooth(aes(x = cen_slope, y = mad_elev_diff), linetype = 2, color = "black", se = FALSE) +
+  scale_color_manual(values = c("red", "blue", "green"), 
+                     labels = c("Model 1", "Model 2", "Model 3")) +
+  labs(x = "Cen_Slope", y = "Mad_Elev_Diff", title = "Model Comparison") 
+```
+
+
+```{r}
+stor_mad_slope_prof %>% 
+  ggplot() +
+  geom_point(aes(x = cen_slope, y = mad_elev_diff), color = "brown") + 
+  geom_function(fun = function(cen_slope) predict(nmad_slope_prof1, newdata = data.frame(cen_slope = cen_slope)), color = "red") + 
+  geom_function(fun = function(cen_slope) predict(nmad_slope_prof2, newdata = data.frame(cen_slope = cen_slope)), color = "blue") + 
+  geom_function(fun = function(cen_slope) predict(nmad_slope_prof3, newdata = data.frame(cen_slope = cen_slope)), color = "green") + 
+  geom_smooth(aes(x = cen_slope, y = mad_elev_diff), linetype = 2, color = "black", se = FALSE) +
+  scale_color_manual(values = c("red", "blue", "green"), 
+                     labels = c("Model 1", "Model 2", "Model 3")) +
+  labs(x = "Cen_Slope", y = "Mad_Elev_Diff", title = "Model Comparison") 
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

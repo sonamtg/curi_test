@@ -1,0 +1,475 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r, message = FALSE}
+library(tidyverse)
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+library(sf)
+library(tibble)
+library(tidymodels)
+library(caret)
+library(stats)
+
+stor_cor_df <- read_csv("data/stor_cor_df.csv")
+stor_cor_zscore <- read_csv("data/stor_cor_zscore.csv")
+stor_cor_interpolation <- read_csv("data/stor_cor_interpolation.csv")
+```
+
+Original grouping and cut_number 
+```{r}
+
+model <- stor_cor_interpolation
+
+stor_med_elev <- stor_cor_interpolation%>% 
+  group_by(elev_cut) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         count = n()) %>% 
+  ungroup() %>% 
+     mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+            upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+          med_elev_cut = (lower_elev + upper_elev) / 2,
+          cen_elev_med = med_elev_cut - median(med_elev_cut))
+
+med_model <- lm(med_elev_diff ~ polym(cen_elev_med, degree=3, raw=TRUE), data = stor_med_elev, weights = count) 
+summary(med_model)
+
+model$pred_med_elev_diff <- predict(med_model, newdata = model)
+
+
+orig <- stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  mutate(slope_cut = fct_collapse(slope_cut, "(26.4,87.2]" = c("(26.4,30.4]","(30.4,34]", "(34,37.2]", "(37.2,42]", "(42,50.8]", "(50.8,87.2]"))) %>% 
+  mutate(slope_cut = fct_collapse(slope_cut, "(8.48,13.9]" = c("(8.48,11.1]", "(11.1,13.9]")))%>%
+  mutate(slope_cut = fct_reorder(slope_cut, slope_degrees))%>%
+  mutate(max_curve_bin = fct_reorder(max_curve_bin,max_curv))%>%
+  group_by(slope_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_max = median(max_curv_5, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max, na.rm = TRUE)) %>% 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE)) %>%
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max, na.rm = TRUE)) %>% 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE))
+
+
+orig%>%
+  ggplot(aes(x = med_slope, color=max_curve_bin, size = ct)) +
+  geom_point(aes(y = mad_elev_diff)) 
+
+model <- model %>%
+  mutate(
+        cen_slope = slope_degrees - median(orig$med_slope),
+        cen_max = max_curv - median(orig$med_max, na.rm = TRUE)) 
+
+model1_cen <- lm(mad_elev_diff~cen_slope + cen_max + cen_slope:cen_max, 
+                    data = orig[orig$cen_slope<11.1- median(orig$med_slope),]) 
+model2_cen <- lm(mad_elev_diff~cen_max, 
+                    data = orig[orig$cen_slope>11.1 - median(orig$med_slope),])
+  
+
+
+summary(model1_cen)
+summary(model2_cen)
+model <- model %>% 
+  mutate(cen_max = ifelse(cen_max > 2.45, 3.46 - 
+                            median(orig$med_max), cen_max), 
+    pred_mad = ifelse(slope_degrees < median(orig$med_slope), predict(model1_cen, newdata = .), 
+                      predict(model2_cen, newdata = .))) 
+
+z_score <- model %>% 
+  mutate(z_score = (elev_diff_no_outliers - pred_med_elev_diff) / pred_mad)
+
+sd(z_score$z_score, na.rm = TRUE)
+hist(z_score$z_score)
+hist(z_score$pred_mad)
+```
+
+
+collapsed bins for slope_cut and used a third pollynomial model with max_curv and slope
+```{r}
+stor_cor_interpolation <- read_csv("data/stor_cor_interpolation.csv")
+
+model <- stor_cor_interpolation
+
+stor_med_elev <- stor_cor_interpolation%>% 
+  group_by(elev_cut) %>% 
+  #We only used elevation because its R^2 was already within the 90s. Although the other variables were significant, they did not effect the R^2 too much
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), # filled_elev_diff instead??
+         count = n()) %>% #counts will play a role in making the model
+  ungroup() %>% 
+     mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+            upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+          med_elev_cut = (lower_elev + upper_elev) / 2,
+          cen_elev_med = med_elev_cut - median(med_elev_cut)) #1450 instead of 1475 like the one in z_scoreLBV 
+
+med_model <- lm(med_elev_diff ~ polym(cen_elev_med, degree=3, raw=TRUE), data = stor_med_elev, weights = count) #we choose this model despite having significance in the other ones b/c elev already accounted for 90% of the data (R^2 =90+%)
+summary(med_model)
+#stor_med_elev$med_residuals <- c(NA, residuals(med_model)) #???
+
+
+#predicting for Med for every point
+model$pred_med_elev_diff <- predict(med_model, newdata = model)
+
+
+orig_1 <- stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+ #mutate(max_curve_bin = fct_collapse(max_curve_bin, "(2.45,338]" = c("(2.45, 3.46]", "(3.46,338]"))) %>% 
+  mutate(slope_cut = fct_collapse(slope_cut, "(16.8,87.2]" = c("(16.8,19.7]","(19.7,22.8]","(19.7,22.8]","(22.8,26.4]","(26.4,30.4]","(30.4,34]", "(34,37.2]", "(37.2,42]", "(42,50.8]", "(50.8,87.2]"))) %>% 
+ mutate(slope_cut = fct_collapse(slope_cut, "(8.48,16.8]" = c("(8.48,11.1]", "(11.1,13.9]", "(13.9,16.8]")))%>%
+  mutate(slope_cut = fct_reorder(slope_cut, slope_degrees))%>%
+  mutate(max_curve_bin = fct_reorder(max_curve_bin,max_curv))%>%
+  group_by(slope_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_max = median(max_curv_5, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE))
+
+orig_1%>%
+  ggplot(aes(x = med_slope, color=max_curve_bin, size = ct)) +
+  geom_point(aes(y = mad_elev_diff)) 
+
+model <- model %>%
+  mutate(#cen_elev_med = elev - median(stor_med_elev$med_elev_cut),  #1450
+        cen_slope = slope_degrees - median(orig_1$med_slope), #21.01295 or #13.81507
+        cen_max = max_curv - median(orig_1$med_max, na.rm = TRUE)) #1.026125
+
+
+mad_model_1 <- lm(mad_elev_diff ~ polym(cen_max,cen_slope,degree=3, raw=TRUE), data = orig_1)
+
+summary(mad_model_1)
+
+model$pred_mad <- predict(mad_model_1, newdata = model)
+
+
+z_score <- model %>% 
+  mutate(z_score = (elev_diff_no_outliers - pred_med_elev_diff) / pred_mad)
+
+sd(z_score$z_score, na.rm = TRUE)
+hist(z_score$z_score)
+hist(z_score$pred_mad)
+```
+
+used manual binning for max_curve and slope
+```{r}
+stor_cor_interpolation <- read_csv("data/stor_cor_interpolation.csv")
+
+model <- stor_cor_interpolation
+
+stor_med_elev <- stor_cor_interpolation%>% 
+  group_by(elev_cut) %>% 
+  #We only used elevation because its R^2 was already within the 90s. Although the other variables were significant, they did not effect the R^2 too much
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), # filled_elev_diff instead??
+         count = n()) %>% #counts will play a role in making the model
+  ungroup() %>% 
+     mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+            upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+          med_elev_cut = (lower_elev + upper_elev) / 2,
+          cen_elev_med = med_elev_cut - median(med_elev_cut)) #1450 instead of 1475 like the one in z_scoreLBV 
+
+med_model <- lm(med_elev_diff ~ polym(cen_elev_med, degree=3, raw=TRUE), data = stor_med_elev, weights = count) #we choose this model despite having significance in the other ones b/c elev already accounted for 90% of the data (R^2 =90+%)
+summary(med_model)
+#stor_med_elev$med_residuals <- c(NA, residuals(med_model)) #???
+
+
+#predicting for Med for every point
+model$pred_med_elev_diff <- predict(med_model, newdata = model)
+
+manual_bin <- stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+ #mutate(max_curve_bin = fct_collapse(max_curve_bin, "(2.45,338]" = c("(2.45, 3.46]", "(3.46,338]"))) %>% 
+  mutate(slope_cut = cut (slope_degrees,breaks = c(0,5,10,15,20,Inf) ))%>%
+  #mutate(slope_cut = fct_collapse(slope_cut, "(16,80.5]" = c("(16,20.1]","(20.1,28.9]","(28.9,80.5]"))) %>% 
+  mutate(slope_cut = fct_reorder(slope_cut, slope_degrees))%>%
+  mutate(max_curve_bin = cut(max_curv , breaks = c(0,0.5,0.75,1,1.5,2,3,Inf)))%>%
+  mutate(max_curve_bin = fct_reorder(max_curve_bin,max_curv))%>%
+  group_by(slope_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_max = median(max_curv_5, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE))#center of slope 
+
+manual_bin%>%
+  ggplot(aes(x = med_slope, color=max_curve_bin, size = ct)) +
+  geom_point(aes(y = mad_elev_diff)) 
+
+model <- model %>%
+  mutate(#cen_elev_med = elev - median(stor_med_elev$med_elev_cut),  #1450
+        cen_slope = slope_degrees - median(manual_bin$med_slope), #21.01295 or #13.81507
+        cen_max = max_curv - median(manual_bin$med_max, na.rm = TRUE)) #1.026125
+
+
+mad_model_1 <- lm(mad_elev_diff ~ polym(cen_max,cen_slope,degree=3, raw=TRUE), data = manual_bin)
+
+
+
+summary(mad_model_1)
+model$pred_mad <- predict(mad_model_1, newdata = model)
+
+manual_bin%>%
+  ggplot(aes(x = med_slope, color=max_curve_bin)) +
+  geom_point(aes(y = mad_elev_diff))+
+  geom_line(aes(color = model$pred_mad))
+
+z_score <- model %>% 
+  mutate(z_score = (elev_diff_no_outliers - pred_med_elev_diff) / pred_mad)
+
+sd(z_score$z_score, na.rm = TRUE)
+hist(z_score$z_score)
+hist(z_score$pred_mad)
+
+```
+
+manual binning of slope but grouped by elev_cut rather than max_curve and third polynomial model used with slope and elev as explanatory (didn't change the binning for elev)
+```{r}
+stor_cor_interpolation <- read_csv("data/stor_cor_interpolation.csv")
+
+model <- stor_cor_interpolation
+
+stor_med_elev <- stor_cor_interpolation%>% 
+  group_by(elev_cut) %>% 
+  #We only used elevation because its R^2 was already within the 90s. Although the other variables were significant, they did not effect the R^2 too much
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), # filled_elev_diff instead??
+         count = n()) %>% #counts will play a role in making the model
+  ungroup() %>% 
+     mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+            upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+          med_elev_cut = (lower_elev + upper_elev) / 2,
+          cen_elev_med = med_elev_cut - median(med_elev_cut)) #1450 instead of 1475 like the one in z_scoreLBV 
+
+med_model <- lm(med_elev_diff ~ polym(cen_elev_med, degree=3, raw=TRUE), data = stor_med_elev, weights = count) #we choose this model despite having significance in the other ones b/c elev already accounted for 90% of the data (R^2 =90+%)
+summary(med_model)
+#stor_med_elev$med_residuals <- c(NA, residuals(med_model)) #???
+
+
+#predicting for Med for every point
+model$pred_med_elev_diff <- predict(med_model, newdata = model)
+
+
+manual_bin_elev <- stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+ #mutate(max_curve_bin = fct_collapse(max_curve_bin, "(2.45,338]" = c("(2.45, 3.46]", "(3.46,338]"))) %>% 
+  mutate(slope_cut = cut (slope_degrees,breaks = c(0,5,10,15,20,Inf) ))%>%
+  #mutate(slope_cut = fct_collapse(slope_cut, "(16,80.5]" = c("(16,20.1]","(20.1,28.9]","(28.9,80.5]"))) %>% 
+  mutate(slope_cut = fct_reorder(slope_cut, slope_degrees))%>%
+  group_by(slope_cut, elev_cut) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_elev = median(elev, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_elev = med_elev - median(med_elev, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE))%>%#center of slope
+   mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+            upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+          med_elev_cut = (lower_elev + upper_elev) / 2,
+          cen_elev_med = med_elev_cut - median(med_elev_cut))
+  
+manual_bin_elev%>%
+  ggplot(aes(x = elev_cut, color=med_slope, size = ct)) +
+  geom_point(aes(y = mad_elev_diff)) 
+
+model <- model %>%
+  mutate(#cen_elev_med = elev - median(stor_med_elev$med_elev_cut),  #1450
+        cen_slope = slope_degrees - median(manual_bin_elev$med_slope))
+
+mad_model_1 <- lm(mad_elev_diff ~ polym(cen_elev_med,cen_slope,degree=3, raw=TRUE), data = manual_bin_elev)
+
+
+
+summary(mad_model_1)
+model$pred_mad <- predict(mad_model_1, newdata = model)
+
+
+z_score <- model %>% 
+  mutate(z_score = (elev_diff_no_outliers - pred_med_elev_diff) / pred_mad)
+
+sd(z_score$z_score, na.rm = TRUE)
+hist(z_score$z_score)
+hist(z_score$pred_mad)
+
+```
+
+
+manual binning of slope and elev (this is the best sd(z_score))
+```{r}
+stor_cor_interpolation <- read_csv("data/stor_cor_interpolation.csv")
+
+model <- stor_cor_interpolation
+
+stor_med_elev <- stor_cor_interpolation%>% 
+  group_by(elev_cut) %>% 
+  #We only used elevation because its R^2 was already within the 90s. Although the other variables were significant, they did not effect the R^2 too much
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), # filled_elev_diff instead??
+         count = n()) %>% #counts will play a role in making the model
+  ungroup() %>% 
+     mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+            upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+          med_elev_cut = (lower_elev + upper_elev) / 2,
+          cen_elev_med = med_elev_cut - median(med_elev_cut)) #1450 instead of 1475 like the one in z_scoreLBV 
+
+
+med_model <- lm(med_elev_diff ~ polym(cen_elev_med, degree=3, raw=TRUE), data = stor_med_elev, weights = count) #we choose this model despite having significance in the other ones b/c elev already accounted for 90% of the data (R^2 =90+%)
+summary(med_model)
+#stor_med_elev$med_residuals <- c(NA, residuals(med_model)) #???
+
+
+#predicting for Med for every point
+model$pred_med_elev_diff <- predict(med_model, newdata = model)
+
+
+
+manual_new_bin_elev_ <- stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+ #mutate(max_curve_bin = fct_collapse(max_curve_bin, "(2.45,338]" = c("(2.45, 3.46]", "(3.46,338]"))) %>% 
+  mutate(slope_cut = cut (slope_degrees,breaks = c(0,5,10,15,20,Inf) ))%>%
+  mutate(elev_cut = cut (elev,breaks = c(1150,1250,1300,1350,1400,1450,1500,1550,1600,1750,Inf) ))%>%
+  #mutate(slope_cut = fct_collapse(slope_cut, "(16,80.5]" = c("(16,20.1]","(20.1,28.9]","(28.9,80.5]"))) %>% 
+  mutate(slope_cut = fct_reorder(slope_cut, slope_degrees))%>%
+  mutate(elev_cut = fct_reorder(elev_cut, elev))%>%
+  group_by(slope_cut, elev_cut) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_elev = median(elev, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>%
+  mutate(cen_elev = med_elev - median(med_elev, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE))%>%#center of slope 
+mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+            upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+          med_elev_cut = (lower_elev + upper_elev) / 2,
+          cen_elev_med = med_elev_cut - median(med_elev_cut))
+
+manual_new_bin_elev_%>%
+  ggplot(aes(x = elev_cut, color=med_slope, size = ct)) +
+  geom_point(aes(y = mad_elev_diff)) 
+
+model <- model %>%
+  mutate(#cen_elev_med = elev - median(stor_med_elev$med_elev_cut),  #1450
+        cen_slope = slope_degrees - median(manual_new_bin_elev_$med_slope)) #1.026125)
+
+mad_model_1 <- lm(mad_elev_diff ~ polym(cen_elev_med,cen_slope,degree=3, raw=TRUE), data = manual_new_bin_elev_)
+
+
+
+summary(mad_model_1)
+model$pred_mad <- predict(mad_model_1, newdata = model)
+
+
+z_score <- model %>% 
+  mutate(z_score = (elev_diff_no_outliers - pred_med_elev_diff) / pred_mad)
+
+sd(z_score$z_score, na.rm = TRUE)
+hist(z_score$z_score)
+hist(z_score$pred_mad)
+
+```
+
+manual bin for max,slope and elev (3.5 sd(z_score))
+```{r}
+stor_cor_interpolation <- read_csv("data/stor_cor_interpolation.csv")
+
+model <- stor_cor_interpolation
+
+stor_med_elev <- stor_cor_interpolation%>% 
+  group_by(elev_cut) %>% 
+  #We only used elevation because its R^2 was already within the 90s. Although the other variables were significant, they did not effect the R^2 too much
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), # filled_elev_diff instead??
+         count = n()) %>% #counts will play a role in making the model
+  ungroup() %>% 
+     mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+            upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+          med_elev_cut = (lower_elev + upper_elev) / 2,
+          cen_elev_med = med_elev_cut - median(med_elev_cut)) #1450 instead of 1475 like the one in z_scoreLBV 
+
+med_model <- lm(med_elev_diff ~ polym(cen_elev_med, degree=3, raw=TRUE), data = stor_med_elev, weights = count) #we choose this model despite having significance in the other ones b/c elev already accounted for 90% of the data (R^2 =90+%)
+summary(med_model)
+#stor_med_elev$med_residuals <- c(NA, residuals(med_model)) #???
+
+
+#predicting for Med for every point
+model$pred_med_elev_diff <- predict(med_model, newdata = model)
+
+manual_bin <- stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+ #mutate(max_curve_bin = fct_collapse(max_curve_bin, "(2.45,338]" = c("(2.45, 3.46]", "(3.46,338]"))) %>% 
+  mutate(slope_cut = cut (slope_degrees,breaks = c(0,5,10,15,20,Inf) ))%>%
+  #mutate(slope_cut = fct_collapse(slope_cut, "(16,80.5]" = c("(16,20.1]","(20.1,28.9]","(28.9,80.5]"))) %>% 
+  mutate(slope_cut = fct_reorder(slope_cut, slope_degrees))%>%
+  mutate(max_curve_bin = cut(max_curv , breaks = c(0,0.5,0.75,1,1.5,2,3,Inf)))%>%
+  mutate(max_curve_bin = fct_reorder(max_curve_bin,max_curv))%>%
+   mutate(elev_cut = cut (elev,breaks = c(1150,1250,1300,1350,1400,1450,1500,1550,1600,1750,Inf) ))%>%
+  mutate(elev_cut = fct_reorder(elev_cut,elev))%>%
+  group_by(slope_cut, max_curve_bin, elev_cut) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_max = median(max_curv_5, na.rm = TRUE),
+         med_elev = median(elev, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_elev = med_elev - median(med_elev, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE))%>%#center of slope 
+mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+            upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+          med_elev_cut = (lower_elev + upper_elev) / 2,
+          cen_elev_med = med_elev_cut - median(med_elev_cut))
+
+manual_bin%>%
+  ggplot(aes(x = elev_cut, color=med_slope, size = ct)) +
+  geom_point(aes(y = mad_elev_diff)) 
+
+model <- model %>%
+  mutate(#cen_elev_med = elev - median(stor_med_elev$med_elev_cut),  #1450
+        cen_slope = slope_degrees - median(manual_bin$med_slope), #21.01295 or #13.81507
+        cen_max = max_curv - median(manual_bin$med_max, na.rm = TRUE)) #1.026125
+
+
+mad_model_1 <- lm(mad_elev_diff ~ polym(cen_max,cen_slope,cen_elev_med,degree=3, raw=TRUE), data = manual_bin)
+
+
+
+summary(mad_model_1)
+model$pred_mad <- predict(mad_model_1, newdata = model)
+
+
+z_score <- model %>% 
+  mutate(z_score = (elev_diff_no_outliers - pred_med_elev_diff) / pred_mad)
+
+sd(z_score$z_score, na.rm = TRUE)
+hist(z_score$z_score)
+hist(z_score$pred_mad)
+```
+
+
+

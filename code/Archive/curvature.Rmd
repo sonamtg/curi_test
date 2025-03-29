@@ -1,0 +1,57 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+library(tiff)
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+library(sf)
+library(tibble)
+```
+
+```{r}
+# 2015 plan curvature
+lidar_plan <- raster("/home/rstudio/users/boehm/curi_2023_storglaciaren/data/lidar_plan_curv.tif")
+
+# 2015 prof curvature
+lidar_prof <- raster("/home/rstudio/users/boehm/curi_2023_storglaciaren/data/lidar_prof_curv.tif")
+
+# lidar (2015) max curvature
+lidar_max_curv <- raster("/home/rstudio/users/boehm/curi_2023_storglaciaren/data/lidar_max_curv.tif")
+
+```
+
+
+```{r}
+rw <- colorRampPalette(c("red", "white"))(20)
+
+plot(lidar_max_curv, col = magma(13), main = "2015")
+plot(storglacier, add = TRUE)
+
+col_palette <- colorRampPalette(c("blue", "lightgray", "red"))  
+
+rwb2 <- colorRampPalette(c("red", "white", "blue"))(10)
+
+plot(lidar_plan, col = rwb2, main = "plan")
+lidar_max_curv
+```
+
+```{r}
+  mutate(plan_curve_bin = cut(lidar_plan_curv, breaks = c(0, 0.2, .5, 1, 2, 3, 4, 6, 10, 20, 50),
+                         labels = c("0-0.2", "0.2-0.5", "0.5-1", "1-2", "2-3", "3-4", 
+                                    "4-6", "6-10", "10-20", "20-50"))) %>% 
+  mutate(prof_curve_bin = cut(lidar_prof_curv, breaks = c(0, 0.2, .5, 1, 2, 3, 4, 6, 10, 20, 50),
+                         labels = c("0-0.2", "0.2-0.5", "0.5-1", "1-2", "2-3", "3-4", 
+                                    "4-6", "6-10", "10-20", "20-50"))) %>% 
+  mutate(max_curve_bin = cut(lidar_max_curv, breaks = c(0, 0.2, .5, 1, 2, 3, 4, 6, 10, 20, 50),
+                         labels = c("0-0.2", "0.2-0.5", "0.5-1", "1-2", "2-3", "3-4", 
+                                    "4-6", "6-10", "10-20", "20-50")))
+```
+
+

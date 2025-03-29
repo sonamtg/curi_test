@@ -1,0 +1,51 @@
+
+```{r, message = FALSE}
+library(tidyverse)
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+library(ggplot2)
+library(ggplotify)
+rwb <- colorRampPalette(c("red", "white", "blue"))(50)
+
+stor_no_outliers <- read_csv("data/stor_no_outliers.csv") #glacier only w/ outliers removed
+```
+
+
+```{r}
+stor_med_mad <- stor_no_outliers %>% 
+  mutate(lower_prof = ifelse(prof_curve_bin == "[0,0.2]",
+                                0,
+            as.numeric(gsub("\\((.*),.*\\]", "\\1", prof_curve_bin)))) %>% 
+  mutate(upper_prof = ifelse(prof_curve_bin == "[0,0.2]",
+                                0.2,
+            as.numeric(gsub(".*,(.*)\\]", "\\1", prof_curve_bin))))
+  
+
+summary(stor_med_mad$lower_prof)
+summary(stor_med_mad$upper_prof)
+
+
+   # mutate(prof_str = as.numeric(str_replace_all(prof_curve_bin, "[^[:alnum:]]", "")),
+   #        lower_prof = as.numeric(substr(prof_str, 1, 4)),
+   #        upper_prof = as.numeric(substr(prof_str, 5, 8)),
+   #        med_prof_cut = (lower_prof + upper_prof) / 2,
+   #        cen_prof_med = med_prof_cut - median(med_prof_cut)) %>% 
+   #   mutate(max_str = as.numeric(str_replace_all(max_curve_bin, "[^[:alnum:]]", "")),
+   #        lower_max = as.numeric(substr(max_str, 1, 4)),
+   #        upper_max = as.numeric(substr(max_str, 5, 8)),
+   #        med_max_cut = (lower_max + upper_max) / 2,
+   #        cen_max_med = med_max_cut - median(med_max_cut))
+
+
+test <- stor_no_outliers %>% 
+     mutate(plan_str = as.numeric(str_(plan_curve_bin, "[^[//]]", "")),
+          lower_plan = as.numeric(substr(plan_str, 1, 4)),
+          upper_plan = as.numeric(substr(plan_str, 5, 8)),
+          med_plan_cut = (lower_plan + upper_plan) / 2,
+          cen_plan_med = med_plan_cut - median(med_plan_cut))
+
+
+```
+

@@ -1,0 +1,205 @@
+---
+title: "Meraf _nmad_eda"
+output: html_document
+date: '2023-07-06'
+editor_options: 
+  chunk_output_type: console
+---
+```{r, message = FALSE}
+library(tidyverse)
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+rwb <- colorRampPalette(c("red", "white", "blue"))(50)
+plan_curv <- raster("data/lidar_plan_curv.tif")
+max_curv <- raster("data/lidar_max_curv.tif")
+prof_curv <- raster("data/lidar_prof_curv.tif")
+
+```
+ 
+```{r}
+stor_no_outliers <- read_csv("data/stor_no_outliers.csv")
+
+```
+
+
+```{r}
+par(mfrow= c(1,2))
+plot(plan_curv, zlim = c(-15,15), main = "plan curv")
+plot(prof_curv, zlim = c(-15,15), main = "prof curv")
+plot(max_curv, zlim = c(-15,15), main = "max curv")
+```
+
+
+```{r}
+stor_no_out <- stor_no_outliers %>% 
+  mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+        upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+        med_elev_cut = (lower_elev + upper_elev) / 2,
+        cen_elev_med = med_elev_cut - median(med_elev_cut))%>%
+  mutate(mad_elev_diff = mad(elev_diff))
+
+stor_mad0 <- stor_no_out %>% 
+  group_by(slope_cut) %>% 
+  #Do two group by at a time, and switch it out to figure out which variable are important and should be included
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff),
+         med_slope = median(slope),
+         count = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_slope = med_slope - median(med_slope))
+
+
+
+stor_mad1 <- stor_no_out %>% 
+  filter(abs(lidar_plan_curv) < 5)%>%
+  group_by(slope_cut, plan_curve_bin) %>% 
+  #Do two group by at a time, and switch it out to figure out which variable are important and should be included
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff),
+         med_slope = median(slope),
+         med_plan = median(plan_curve),
+         count = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_slope = med_slope - median(med_slope))%>%
+  mutate(cen_plan = med_plan - median(med_plan))
+
+
+stor_mad2 <- stor_no_out %>% 
+  filter(abs(lidar_prof_curv) < 5)%>%
+  mutate(prof_curve= abs(lidar_prof_curv), 
+         prof_curve_bin = cut_number(prof_curve, n = 12))%>%
+  group_by(slope_cut, prof_curve_bin) %>% 
+  #Do two group by at a time, and switch it out to figure out which variable are important and should be included
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff),
+         med_slope = median(slope),
+         med_plan = median(prof_curve),
+         count = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_slope = med_slope - median(med_slope))%>%
+  mutate(cen_plan = med_plan - median(med_plan))
+
+
+stor_mad3 <- stor_no_out %>% 
+  filter(abs(lidar_max_curv) < 5)%>%
+  mutate(max_curve= abs(lidar_max_curv), 
+         max_curve_bin = cut_number(max_curve, n = 12))%>%
+  group_by(slope_cut, max_curve_bin) %>% 
+  #Do two group by at a time, and switch it out to figure out which variable are important and should be included
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff),
+         med_slope = median(slope),
+         med_plan = median(max_curve),
+         count = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_slope = med_slope - median(med_slope))%>%
+  mutate(cen_plan = med_plan - median(med_plan))
+
+stor_mad3 %>%
+  ggplot(aes(x = max_curve_bin, y = mad_elev_diff, size = count ))+
+  geom_point()+
+  scale_y_continuous(limit = c(-1,5))
+
+
+#model for nmad
+library(ModelMetrics)
+
+
+
+#for plan with just slope 
+
+nmad_plan1 <- lm(mad_elev_diff ~ cen_slope, data =stor_mad1, weights = count)
+nmad_plan2 <- lm(mad_elev_diff ~ cen_slope + I(cen_slope ^ 2), data = stor_mad1, weights = count)
+nmad_plan3 <- lm(mad_elev_diff ~ cen_slope + I(cen_slope^2) + I(cen_slope ^ 3), data = stor_mad1, weights = count)
+
+# for prof with just slope 
+nmad_prof1 <- lm(mad_elev_diff ~ cen_slope, data =stor_mad2, weights = count)
+nmad_prof2 <- lm(mad_elev_diff ~ cen_slope + I(cen_slope ^ 2), data = stor_mad2, weights = count)
+nmad_prof3 <- lm(mad_elev_diff ~ cen_slope + I(cen_slope^2) + I(cen_slope ^ 3), data = stor_mad2, weights = count)
+
+# for max with just slope 
+
+nmad_max1 <- lm(mad_elev_diff ~ cen_slope, data =stor_mad3, weights = count)
+nmad_max2 <- lm(mad_elev_diff ~ cen_slope + I(cen_slope ^ 2), data = stor_mad3, weights = count)
+nmad_max3 <- lm(mad_elev_diff ~ cen_slope + I(cen_slope^2) + I(cen_slope ^ 3), data = stor_mad3, weights = count)
+
+summary(nmad_plan3)
+summary(nmad_prof3)
+summary(nmad_max3)
+
+#graphing the model 
+
+#with prof in group by (model of slope)
+stor_mad2 %>%
+  ggplot() +
+  geom_point(aes(x = cen_slope, y = mad_elev_diff), color = "brown") +
+  geom_function(fun = function(cen_slope) predict(nmad_prof1, newdata = data.frame(cen_slope = cen_slope)), color = "red") +
+  geom_function(fun = function(cen_slope) predict(nmad_prof2, newdata = data.frame(cen_slope = cen_slope)), color = "blue") +
+  geom_function(fun = function(cen_slope) predict(nmad_prof3, newdata = data.frame(cen_slope = cen_slope)), color = "green") +
+  geom_smooth(aes(x = cen_slope, y = mad_elev_diff), linetype = 2, color = "black", se = FALSE) +
+  scale_color_manual(values = c("red", "blue", "green"),
+                     labels = c("Model 1", "Model 2", "Model 3")) +
+  labs(x = "cen_slope_", y = "Med_Elev_Diff", title = "Model Comparison")
+
+
+
+rmse(nmad_prof1)
+rmse(nmad_prof2)
+rmse(nmad_prof3)
+
+pred <- predict(nmad_prof3, newdata = stor_mad2)
+
+
+
+stor_no_out <- stor_mad2 %>%
+  mutate(residuals = mad_elev_diff - pred_nmad)
+
+
+stor_no_out %>%
+  ggplot(aes(x = prof_curve_bin, y = residuals))+ #after accounting for slope check if we need to add prof curvature into our model
+  geom_point()+
+  scale_y_continuous(limit = c(-2,3))
+
+
+
+
+# inluding plan in the model 
+
+nmad_final_plan1 <- lm(mad_elev_diff ~ polym(cen_slope, cen_plan,degree=1, raw=TRUE), data = stor_mad1, weights = count)
+nmad_final_plan2 <- lm(mad_elev_diff ~ polym(cen_slope, cen_plan, degree=2, raw=TRUE), data = stor_mad1, weights = count)
+nmad_final_plan3 <- lm(mad_elev_diff ~ polym(cen_slope, cen_plan, degree=3, raw=TRUE), data = stor_mad1, weights = count)
+
+#prof model 
+
+nmad_final_prof1 <- lm(mad_elev_diff ~ polym(cen_slope, cen_prof,degree=1, raw=TRUE), data = stor_mad2, weights = count)
+nmad_final_prof2 <- lm(mad_elev_diff ~ polym(cen_slope, cen_prof, degree=2, raw=TRUE), data = stor_mad2, weights = count)
+nmad_final_prof3 <- lm(mad_elev_diff ~ polym(cen_slope, cen_prof, degree=3, raw=TRUE), data = stor_mad2, weights = count)
+
+
+#max model 
+
+nmad_final_max1 <- lm(mad_elev_diff ~ polym(cen_slope, cen_max,degree=1, raw=TRUE), data = stor_mad3, weights = count)
+nmad_final_max2 <- lm(mad_elev_diff ~ polym(cen_slope, cen_max, degree=2, raw=TRUE), data = stor_mad3, weights = count)
+nmad_final_max3 <- lm(mad_elev_diff ~ polym(cen_slope, cen_max, degree=3, raw=TRUE), data = stor_mad3, weights = count)
+
+summary(nmad_final_prof3)
+summary(nmad_final_plan3)
+summary(nmad_final_max3)
+
+rmse(nmad_final_max3)
+rmse(nmad_final_plan3)
+rmse(nmad_final_prof3)
+
+# our f tests shows us that adding the curvatures as predictors gives us a significant p value
+anova(nmad_max3, nmad_final_max3)
+anova(nmad_prof3, nmad_final_prof3)
+anova(nmad_plan3, nmad_final_plan3)
+
+
+
+
+
+```
+

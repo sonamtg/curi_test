@@ -1,0 +1,534 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r, message = FALSE}
+library(tidyverse)
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+library(sf)
+library(tibble)
+library(tidymodels)
+library(caret)
+library(stats)
+
+stor_cor_df <- read_csv("data/stor_cor_df.csv")
+stor_cor_zscore <- read_csv("data/stor_cor_zscore.csv")
+stor_cor_interpolation <- read_csv("data/stor_cor_interpolation.csv")
+```
+
+
+# orig
+slope_cut: cut number 15
+```{r}
+
+# this was what we have been seeing  so far
+
+orig <- stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+ #mutate(max_curve_bin = fct_collapse(max_curve_bin, "(2.45,338]" = c("(2.45, 3.46]", "(3.46,338]"))) %>% 
+  mutate(slope_cut = fct_collapse(slope_cut, "(26.4,87.2]" = c("(26.4,30.4]","(30.4,34]", "(34,37.2]", "(37.2,42]", "(42,50.8]", "(50.8,87.2]"))) %>% 
+  mutate(slope_cut = fct_collapse(slope_cut, "(8.48,13.9]" = c("(8.48,11.1]", "(11.1,13.9]")))%>%
+  mutate(slope_cut = fct_reorder(slope_cut, slope_degrees))%>%
+  mutate(max_curve_bin = fct_reorder(max_curve_bin,max_curv))%>%
+  group_by(slope_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_max = median(max_curv_5, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE)) 
+orig%>%
+  ggplot(aes(x = med_slope, color=max_curve_bin, size = ct)) +
+  geom_point(aes(y = mad_elev_diff)) 
+
+
+
+# we can see the green slope bins have an unusually large nmad
+
+ orig_1 <- stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+ #mutate(max_curve_bin = fct_collapse(max_curve_bin, "(2.45,338]" = c("(2.45, 3.46]", "(3.46,338]"))) %>% 
+  mutate(slope_cut = fct_collapse(slope_cut, "(16.8,87.2]" = c("(16.8,19.7]","(19.7,22.8]","(19.7,22.8]","(22.8,26.4]","(26.4,30.4]","(30.4,34]", "(34,37.2]", "(37.2,42]", "(42,50.8]", "(50.8,87.2]"))) %>% 
+ mutate(slope_cut = fct_collapse(slope_cut, "(8.48,16.8]" = c("(8.48,11.1]", "(11.1,13.9]", "(13.9,16.8]")))%>%
+  mutate(slope_cut = fct_reorder(slope_cut, slope_degrees))%>%
+  mutate(max_curve_bin = fct_reorder(max_curve_bin,max_curv))%>%
+  group_by(slope_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_max = median(max_curv_5, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE))
+ 
+ orig_1%>%#center of slope 
+  ggplot(aes(x = med_slope, color=max_curve_bin , size = ct)) +
+  geom_point(aes(y = mad_elev_diff))
+
+
+ 
+ orig_2 <- stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+ #mutate(max_curve_bin = fct_collapse(max_curve_bin, "(2.45,338]" = c("(2.45, 3.46]", "(3.46,338]"))) %>% 
+  mutate(slope_cut = fct_collapse(slope_cut, "(26.4,87.2]" = c("(26.4,30.4]","(30.4,34]", "(34,37.2]", "(37.2,42]", "(42,50.8]", "(50.8,87.2]"))) %>% 
+   mutate(slope_cut = fct_collapse(slope_cut, "(5.99,16.8]" = c("(5.99,8.48]","(8.48,11.1]", "(11.1,13.9]", "(13.9,16.8]")))%>%
+  mutate(slope_cut = fct_reorder(slope_cut, slope_degrees))%>%
+  mutate(max_curve_bin = fct_reorder(max_curve_bin,max_curv))%>%
+  group_by(slope_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_max = median(max_curv_5, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE))
+ 
+ orig_2 %>%#center of slope 
+  ggplot(aes(x = max_curve_bin, color=slope_cut , size = ct)) +
+  geom_point(aes(y = mad_elev_diff)) 
+
+ 
+ #fct collapse max_curve bin 
+
+orig_3<-  stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+ #mutate(max_curve_bin = fct_collapse(max_curve_bin, "(1.33,3.05]" = c("(1.33,1.64]","(1.64,2.01]", "(2.01,2.47]", "(2.47,3.05]"))) %>% 
+   mutate(max_curve_bin = fct_collapse(max_curve_bin, "(6.55,1.07e+03]" = c("(6.55,9.75]", "(9.75,18]", "(18,1.07e+03]")))%>%
+  mutate(slope_cut = fct_collapse(slope_cut, "(26.4,87.2]" = c("(26.4,30.4]","(30.4,34]", "(34,37.2]", "(37.2,42]", "(42,50.8]", "(50.8,87.2]"))) %>% 
+  mutate(slope_cut = fct_collapse(slope_cut, "(8.48,13.9]" = c("(8.48,11.1]", "(11.1,13.9]")))%>%
+   mutate(slope_cut = fct_collapse(slope_cut, "(5.99,13.9]" = c("(5.99,8.48]","(8.48,13.9]")))%>%
+  mutate(slope_cut = fct_reorder(slope_cut, slope_degrees))%>%
+  mutate(max_curve_bin = fct_reorder(max_curve_bin,max_curv))%>%
+  group_by(slope_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_max = median(max_curv_5, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE))
+         
+  orig_3 %>%#center of slope 
+  ggplot(aes(x = max_curve_bin, color=slope_cut, size = ct)) +
+  geom_point(aes(y = mad_elev_diff)) 
+
+
+```
+
+
+
+```{r}
+#what happenes when increasing the bin by 5
+stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+ #mutate(max_curve_bin = fct_collapse(max_curve_bin, "(2.45,338]" = c("(2.45, 3.46]", "(3.46,338]"))) %>% 
+  mutate(slope_cut = cut_number (slope_degrees, 15))%>%
+  mutate(slope_cut = fct_collapse(slope_cut, "(16,80.5]" = c("(16,20.1]","(20.1,28.9]","(28.9,80.5]"))) %>% 
+  mutate(slope_cut = fct_reorder(slope_cut, slope_degrees))%>%
+  mutate(max_curve_bin = fct_reorder(max_curve_bin,max_curv))%>%
+  group_by(slope_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_max = median(max_curv_5, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE))%>% #center of slope 
+  ggplot(aes(x = med_slope, color=max_curve_bin, size = ct)) +
+  geom_point(aes(y = mad_elev_diff))
+
+
+
+
+stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+ #mutate(max_curve_bin = fct_collapse(max_curve_bin, "(2.45,338]" = c("(2.45, 3.46]", "(3.46,338]"))) %>% 
+  mutate(max_curve_bin = fct_collapse(max_curve_bin, "(9.75,1.07e+03]"=c("(9.75,18]", "(18,1.07e+03]")))%>%
+  mutate(slope_cut = cut_number (slope_degrees, 20))%>%
+ # mutate(slope_cut = fct_collapse(slope_cut, "(16,80.5]" = c("(16,20.1]","(20.1,28.9]","(28.9,80.5]"))) %>% 
+  mutate(slope_cut = fct_reorder(slope_cut, slope_degrees))%>%
+  mutate(max_curve_bin = fct_reorder(max_curve_bin,max_curv))%>%
+  group_by(slope_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_max = median(max_curv_5, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE))%>% #center of slope 
+  ggplot(aes(x = med_slope, color=max_curve_bin, size = ct)) +
+  geom_point(aes(y = mad_elev_diff))
+
+
+
+
+stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+ #mutate(max_curve_bin = fct_collapse(max_curve_bin, "(2.45,338]" = c("(2.45, 3.46]", "(3.46,338]"))) %>% 
+#  mutate(max_curve_bin = fct_collapse(max_curve_bin, "(9.75,1.07e+03]"=c("(9.75,18]", "(18,1.07e+03]")))%>%
+  mutate(slope_cut = cut_number (slope_degrees, 25))%>%
+ # mutate(slope_cut = fct_collapse(slope_cut, "(16,80.5]" = c("(16,20.1]","(20.1,28.9]","(28.9,80.5]"))) %>% 
+  mutate(slope_cut = fct_reorder(slope_cut, slope_degrees))%>%
+  mutate(max_curve_bin = fct_reorder(max_curve_bin,max_curv))%>%
+  group_by(slope_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_max = median(max_curv_5, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE))%>% #center of slope 
+  ggplot(aes(x = med_slope, color=max_curve_bin, size = ct)) +
+  geom_point(aes(y = mad_elev_diff))
+
+
+
+
+```
+
+
+
+
+```{r}
+manual_bin <- stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+ #mutate(max_curve_bin = fct_collapse(max_curve_bin, "(2.45,338]" = c("(2.45, 3.46]", "(3.46,338]"))) %>% 
+  mutate(slope_cut = cut (slope_degrees,breaks = c(0,5,10,15,20,Inf) ))%>%
+  #mutate(slope_cut = fct_collapse(slope_cut, "(16,80.5]" = c("(16,20.1]","(20.1,28.9]","(28.9,80.5]"))) %>% 
+  mutate(slope_cut = fct_reorder(slope_cut, slope_degrees))%>%
+  mutate(max_curve_bin = cut(max_curv , breaks = c(0,0.5,0.75,1,1.5,2,3,Inf)))%>%
+  mutate(max_curve_bin = fct_reorder(max_curve_bin,max_curv))%>%
+  group_by(slope_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_max = median(max_curv_5, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE))#center of slope 
+
+
+
+manual_bin%>%
+  ggplot(aes(x = max_curve_bin, color=slope_cut, size = ct)) +
+  geom_point(aes(y = mad_elev_diff))
+
+manual_bin%>%
+  ggplot(aes(x = slope_cut, color=max_curve_bin, size = ct)) +
+  geom_point(aes(y = mad_elev_diff))
+
+manual_bin%>%
+  ggplot(aes(x = max_curve_bin, fill=mad_elev_diff)) +
+  geom_tile(aes(y = slope_cut))
+
+manual_bin%>%
+  ggplot(aes(x = max_curve_bin, fill=ct)) +
+  geom_tile(aes(y = slope_cut))
+
+manual_bin%>%
+  ggplot(aes(x = med_max, color=mad_elev_diff)) +
+  geom_point(aes(y = med_slope, size = ct))
+```
+
+
+```{r}
+manual_bin_elev <- stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+ #mutate(max_curve_bin = fct_collapse(max_curve_bin, "(2.45,338]" = c("(2.45, 3.46]", "(3.46,338]"))) %>% 
+  mutate(slope_cut = cut (slope_degrees,breaks = c(0,5,10,15,20,Inf) ))%>%
+  #mutate(slope_cut = fct_collapse(slope_cut, "(16,80.5]" = c("(16,20.1]","(20.1,28.9]","(28.9,80.5]"))) %>% 
+  mutate(slope_cut = fct_reorder(slope_cut, slope_degrees))%>%
+  group_by(slope_cut, elev_cut) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_elev = median(elev, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_elev = med_elev - median(med_elev, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE))#center of slope 
+
+
+
+manual_bin_elev%>%
+  ggplot(aes(x = elev_cut, color=slope_cut, size = ct)) +
+  geom_point(aes(y = mad_elev_diff))
+
+manual_bin_elev%>%
+  ggplot(aes(x = med_slope, color=elev_cut)) +
+  geom_point(aes(y = mad_elev_diff, size = ct))+
+  geom_line(aes(y = mad_elev_diff))
+
+manual_bin_elev%>%
+  ggplot(aes(x = elev_cut, fill=mad_elev_diff)) +
+  geom_tile(aes(y = slope_cut))
+
+manual_bin_elev%>%
+  ggplot(aes(x = elev_cut, fill=ct)) +
+  geom_tile(aes(y = slope_cut))
+
+manual_bin_elev%>%
+  ggplot(aes(x = med_elev, color=mad_elev_diff)) +
+  geom_point(aes(y = med_slope, size = ct))
+```
+
+```{r}
+manual_new_bin_elev_ <- stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+ #mutate(max_curve_bin = fct_collapse(max_curve_bin, "(2.45,338]" = c("(2.45, 3.46]", "(3.46,338]"))) %>% 
+  mutate(slope_cut = cut (slope_degrees,breaks = c(0,5,10,15,20,Inf) ))%>%
+  mutate(elev_cut = cut (elev,breaks = c(1150,1250,1300,1350,1400,1450,1500,1550,1600,1750,Inf) ))%>%
+  #mutate(slope_cut = fct_collapse(slope_cut, "(16,80.5]" = c("(16,20.1]","(20.1,28.9]","(28.9,80.5]"))) %>% 
+  mutate(slope_cut = fct_reorder(slope_cut, slope_degrees))%>%
+  group_by(slope_cut, elev_cut) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_elev = median(elev, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_elev = med_elev - median(med_elev, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE))#center of slope 
+
+
+
+manual_new_bin_elev_%>%
+  ggplot(aes(x = elev_cut, color=slope_cut, size = ct)) +
+  geom_point(aes(y = mad_elev_diff))
+
+manual_new_bin_elev_%>%
+  ggplot(aes(x = med_slope, color=elev_cut)) +
+  geom_point(aes(y = mad_elev_diff, size = ct))+
+  geom_line(aes(y = mad_elev_diff))
+
+manual_new_bin_elev_%>%
+  ggplot(aes(x = elev_cut, fill=mad_elev_diff)) +
+  geom_tile(aes(y = slope_cut))
+
+manual_new_bin_elev_%>%
+  ggplot(aes(x = elev_cut, fill=ct)) +
+  geom_tile(aes(y = slope_cut))
+
+manual_bin_elev%>%
+  ggplot(aes(x = med_elev, color=mad_elev_diff)) +
+  geom_point(aes(y = med_slope, size = ct))
+
+```
+
+
+
+
+```{r}
+#modeling 
+
+
+orig <- stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+ #mutate(max_curve_bin = fct_collapse(max_curve_bin, "(2.45,338]" = c("(2.45, 3.46]", "(3.46,338]"))) %>% 
+  mutate(slope_cut = fct_collapse(slope_cut, "(26.4,87.2]" = c("(26.4,30.4]","(30.4,34]", "(34,37.2]", "(37.2,42]", "(42,50.8]", "(50.8,87.2]"))) %>% 
+  mutate(slope_cut = fct_collapse(slope_cut, "(8.48,13.9]" = c("(8.48,11.1]", "(11.1,13.9]")))%>%
+  mutate(slope_cut = fct_reorder(slope_cut, slope_degrees))%>%
+  mutate(max_curve_bin = fct_reorder(max_curve_bin,max_curv))%>%
+  group_by(slope_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_max = median(max_curv_5, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE)) %>%
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE)) 
+
+orig%>%
+  ggplot(aes(x = med_slope, color=max_curve_bin, size = ct)) +
+  geom_point(aes(y = mad_elev_diff)) 
+
+model1_cen <- lm(mad_elev_diff~cen_slope + cen_max + cen_slope:cen_max, 
+                    data = orig[orig$cen_slope<11.1- median(orig$med_slope),]) # uses center slope (this is what we used to get the z score, we are predicting on stor_no_out)
+model2_cen <- lm(mad_elev_diff~cen_max, 
+                    data = orig[orig$cen_slope>11.1 - median(orig$med_slope),]) #for center slope our condition is different because med_slope and cen_slope are not the same based on our graphs from the bottom we picked 11.3 by looking at the end of the bin of slope_degree that falls in the area of cen_slope around 0
+
+
+summary(model1_cen)
+summary(model2_cen)
+
+orig_pred <- stor_cor_interpolation %>% 
+  # leave max_curv as it is as we dont use it in our model
+ # mutate(cen_slope = ifelse(cen_slope > 12, 12, cen_slope))%>%
+  mutate(cen_max = ifelse(cen_max > 2.45, 3.46 - #needs to be updated?
+                            median(orig$med_max), cen_max), 
+    pred_mad = ifelse(slope_degrees < median(orig$med_slope), predict(model1_cen, newdata = .), ####13.9 makes SD nice, but left graph is off????????????????
+                      predict(model2_cen, newdata = .))) #instead of using 12 as our condition we switched it to 11.3 because it was the end of the bin at center slope 0/1
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+ #mutate(max_curve_bin = fct_collapse(max_curve_bin, "(2.45,338]" = c("(2.45, 3.46]", "(3.46,338]"))) %>% 
+  mutate(slope_cut = cut_number(slope_degrees, 15)) %>% 
+#  mutate(slope_cut = fct_collapse(slope_cut, "(26.4,87.2]" = c("(26.4,30.4]","(30.4,34]", "(34,37.2]", "(37.2,42]", "(42,50.8]", "(50.8,87.2]"))) %>% 
+  mutate(max_curve_bin = fct_reorder(max_curve_bin,max_curv))%>%
+  group_by(slope_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_max = median(max_curv_5, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE)) %>% #center of slope 
+  ggplot(aes(x = med_slope, color=max_curve_bin, size = ct)) +
+  geom_point(aes(y = mad_elev_diff)) 
+
+```
+
+uses cut interval 
+```{r}
+ stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+ #mutate(max_curve_bin = fct_collapse(max_curve_bin, "(2.45,338]" = c("(2.45, 3.46]", "(3.46,338]"))) %>% 
+  mutate(slope_cut = cut_interval(slope_degrees, 15)) %>% 
+#  mutate(slope_cut = fct_collapse(slope_cut, "(26.4,87.2]" = c("(26.4,30.4]","(30.4,34]", "(34,37.2]", "(37.2,42]", "(42,50.8]", "(50.8,87.2]"))) %>% 
+  group_by(slope_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_max = median(max_curv_5, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE)) %>% #center of slope 
+  ggplot(aes(x = slope_cut, color=max_curve_bin)) +
+  geom_point(aes(y = mad_elev_diff)) 
+
+
+
+
+```
+
+
+
+```{r}
+ stor_cor_interpolation %>%
+  filter(is.glacier == 1)%>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA)) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+ #mutate(max_curve_bin = fct_collapse(max_curve_bin, "(2.45,338]" = c("(2.45, 3.46]", "(3.46,338]"))) %>% 
+  mutate(slope_cut = cut_number(slope_degrees, 15)) %>% 
+  mutate(slope_cut = fct_collapse(slope_cut, "(26.4,87.2]" = c("(26.4,30.4]","(30.4,34]", "(34,37.2]", "(37.2,42]", "(42,50.8]", "(50.8,87.2]"))) %>% 
+  group_by(slope_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+         mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+         med_slope = median(slope_degrees),
+         med_max = median(max_curv_5, na.rm = TRUE),
+         ct = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max, na.rm = TRUE)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope, na.rm = TRUE)) %>% #center of slope 
+  ggplot(aes(x = slope_cut, color=max_curve_bin)) +
+  geom_point(aes(y = mad_elev_diff)) 
+  
+```
+
+#mannual binning 
+
+```{r}
+stor_cor_interpolation %>%
+  filter(is.glacier == 1) %>%
+  mutate(max_curv_5 = ifelse(max_curv < 5, max_curv, NA),
+         slope_cut = case_when(
+           slope_degrees <= 2.5 ~ "Bin1",
+           slope_degrees > 2.5 & slope_degrees <= 5 ~ "Bin2",
+           slope_degrees > 5 & slope_degrees <= 10 ~ "Bin3",
+           slope_degrees > 10 & slope_degrees <= 15 ~ "Bin4",
+           slope_degrees > 15 & slope_degrees <= 20 ~ "Bin5",
+           slope_degrees > 20 & slope_degrees <= 30 ~ "Bin6",
+           slope_degrees > 30 & slope_degrees <= 40 ~ "Bin7",
+           slope_degrees > 40 & slope_degrees <= 50 ~ "Bin8",
+           slope_degrees > 50 & slope_degrees <= 60 ~ "Bin9",
+           slope_degrees > 60 & slope_degrees <= 70 ~ "Bin10",
+           slope_degrees > 70 & slope_degrees <= 80 ~ "Bin11",
+           slope_degrees > 80 & slope_degrees <= 90 ~ "Bin12",
+           TRUE ~ "Other"
+         )) %>%
+  mutate
+  group_by(slope_cut, max_curve_bin) %>%
+  summarise(
+    med_elev_diff = median(elev_diff_no_outliers, na.rm = TRUE), 
+    mad_elev_diff = mad(elev_diff_no_outliers, na.rm = TRUE),
+    med_slope = median(slope_degrees),
+    med_max = median(max_curv_5, na.rm = TRUE),
+    ct = n()
+  ) %>%
+  ungroup() %>%
+  mutate(cen_max = med_max - median(med_max, na.rm = TRUE),
+         cen_slope = med_slope - median(med_slope, na.rm = TRUE))%>%
+  ggplot(aes(x = slope_cut, color=max_curve_bin, size = ct)) +
+  geom_point(aes(y = mad_elev_diff)) 
+
+summary(stor_cor_interpolation$slope_degrees)
+```
+

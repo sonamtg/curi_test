@@ -1,0 +1,132 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r, message = FALSE}
+#install.packages("dplyr")
+library(dplyr)
+library(tidyverse)
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+library(sf)
+library(tibble)
+library(tidymodels)
+library(caret)
+library(stats)
+```
+
+```{r}
+#setwd("/home/rstudio/users/gurung2/curi_test")
+stor_cor_df <- read_csv("data/stor_cor_df.csv")
+
+```
+
+#Setting out a dataset for making a polynomial model, then selecting it for us to use to interpolate (filling in for missing data)
+
+```{r}
+elev_bins_med_glacier <- stor_cor_df %>% 
+  filter(is.glacier == 1) %>% 
+  filter(!is.na(elev_diff_no_outliers)) %>% 
+  group_by(elev_cut) %>% 
+  summarise(med_elev_diff = median(elev_diff),
+            count = n()) %>% 
+  mutate(lower = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+         upper = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+         med_elev_cut = (lower + upper) / 2,
+         mmed = median(med_elev_cut)) %>% 
+  mutate(cen_elev_med = med_elev_cut - mmed) #1475
+
+elev_bins_med_glacier %>% 
+  ggplot(aes(x = cen_elev_med, y = med_elev_diff)) +
+  geom_point()
+
+```
+
+# creating three different polynomial degree models 
+
+```{r}
+# weighted
+poly_1 <- lm(med_elev_diff ~ cen_elev_med, data = elev_bins_med_glacier, weights = count)
+summary(poly_1)
+```
+
+```{r}
+poly_2 <- lm(med_elev_diff ~ cen_elev_med + I(cen_elev_med ^ 2), data = elev_bins_med_glacier, weights = count)
+summary(poly_2)
+
+```
+
+```{r}
+poly_3 <- lm(med_elev_diff ~ cen_elev_med + I(cen_elev_med ^ 2) + I(cen_elev_med ^ 3), data = elev_bins_med_glacier, weights = count)
+summary(poly_3)
+```
+ 
+# From the plot below, you can see that the 3rd degree model is better than all the others
+```{r}
+
+pdf("~interploation_poly.pdf", width = 6.5, height = 4)
+
+elev_bins_med_glacier %>% 
+  ggplot() +
+  geom_point(aes(x = cen_elev_med, y = med_elev_diff), color = "brown") + 
+  geom_function(fun = function(cen_elev_med) predict(poly_1, newdata = data.frame(cen_elev_med = cen_elev_med)), aes(color = "1st Degree")) + 
+  geom_function(fun = function(cen_elev_med) predict(poly_2, newdata = data.frame(cen_elev_med = cen_elev_med)), aes(color = "2nd Degree")) + 
+  geom_function(fun = function(cen_elev_med) predict(poly_3, newdata = data.frame(cen_elev_med = cen_elev_med)), aes(color = "3rd Degree")) +
+  geom_smooth(aes(x = cen_elev_med, y = med_elev_diff, color = "Original"), linetype = 2, color = "black", se = FALSE) +
+  scale_color_manual(values = c("red", "blue", "purple"), 
+                     labels = c("1st Degree", "2nd Degree", "3rd Degree")) +
+  theme(axis.text.x = element_text(size = 15),
+        axis.text.y = element_text(size = 14),
+        axis.title = element_text(size = 15)
+        ) +
+  labs(x = "Centered Median Elevation", y = "Median Elevation Difference ")
+
+dev.off()
+```
+ 
+
+#identifying the void pixels and predicting diff on the main dataset. We write this data frame as a csv file. 
+```{r}
+stor_cor_interpolation <- stor_cor_df %>% 
+  filter(is.glacier == 1) %>% 
+  mutate(cen_elev_med = elev - elev_bins_med_glacier$mmed [1]) %>% 
+  mutate(pred_elev_diff = predict(poly_3, newdata = .),
+    filled_elev_diff = (ifelse(is.na(elev_diff), pred_elev_diff, elev_diff)),
+    is_predicted = ifelse(is.na(elev_diff), TRUE, FALSE)) 
+```
+
+#calculating the total vol change
+```{r}
+stor_cor_interpolation %>% 
+  summarise(total_vol_chg = sum(pred_elev_diff) * 4/1000^3, med_elev_diff = median(pred_elev_diff)) #  -0.00790 km^3
+```
+
+
+```{r}
+fill_raster <- stor_cor_interpolation %>% 
+  dplyr::select(x, y, filled_elev_diff) %>% 
+  rasterFromXYZ()
+```
+
+#Checking to see if the interpolation worked (which it did), and to see if it made sense
+```{r}
+plot(fill_raster, col = magma(10), zlim = c(-20,20))
+plot(fill_raster, col = rwb, zlim = c(-20,20))
+plot(storglacier, add = TRUE) #zoom in on the missing data region to see how it looks
+#compare this to the lidar for the void location
+```
+
+
+```{r}
+stor_cor_interpolation <- stor_cor_interpolation %>%
+  dplyr::select("x","y","elev_diff","elev_cut","slope_degrees","med_with_outliers","mad_with_outliers","slope_cut","max_curve_bin","cen_elev_med","pred_elev_diff","filled_elev_diff","is_predicted", "elev_diff_no_outliers", "is.glacier", "max_curv", "elev")
+  
+#write_csv(stor_cor_interpolation, "data/stor_cor_interpolation.csv") 
+```
+
+
+
+Next open z score rmd file

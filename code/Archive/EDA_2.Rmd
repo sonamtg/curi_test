@@ -1,0 +1,322 @@
+---
+title: "Open and View Storglaciaren"
+author: "Laura Boehm Vock"
+date: "2023-05-22"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, message = FALSE}
+library(tidyverse)
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+rwb <- colorRampPalette(c("red", "white", "blue"))(50)
+```
+
+```{r}
+setwd("~/curi_2023_storglaciaren")
+
+# 2015 data
+lidar_2m <- raster("data/Tarfala_Lantmatriet_2015AUG21_2M.tif")
+
+# 2022 data
+uav_2m_utm <- raster("data/storglaciaren_2022_sept_uav_2m_SWEREF99_TM.tif")
+
+# glacier outline in 2022
+storglacier <- shapefile("data/Storglaciaren_Extents_2022/Storglaciaren_Extents_2022SEP.shp")
+
+
+
+lidar_2m
+uav_2m_utm
+storglacier
+
+plot(lidar_2m, col= magma(64), main = "2015" )
+plot(storglacier, add = TRUE)
+
+plot(uav_2m_utm, col = magma(64), main = "2022")
+plot(storglacier, add = TRUE)
+
+
+```
+
+In order to take the difference, we need to be sure the two grids align with each other. 
+This process is called *resampling*. 
+Read about it here: 
+https://desktop.arcgis.com/en/arcmap/latest/extensions/spatial-analyst/performing-analysis/cell-size-and-resampling-in-analysis.htm
+
+
+```{r}
+diff <- resample(uav_2m_utm, lidar_2m) - lidar_2m
+```
+
+```{r, eval = FALSE}
+# See help menu for resample function
+?resample
+```
+
+
+Plot of differences: (Note: try plotting with and without the trim function)
+```{r}
+plot(trim(diff), col = rwb)
+plot(storglacier, add = TRUE)
+```
+
+As you can see above, the differences are around 30m, even off the glacier, where there should be no change. 
+There is some sort of issue with calibration that we will deal with more in depth later.
+
+
+The "mask" function will mask out the glacier. Using cellStats, we then calculate the median difference in elevation in the "off glacier" area. 
+```{r}
+mask(diff, storglacier, inverse = TRUE) %>% cellStats(stat = median)
+```
+
+
+```{r}
+diff_adj <- diff - 31.28
+
+plot(trim(diff_adj), col = rwb, zlim = c(-15, 15))
+plot(storglacier, add = TRUE)
+```
+
+
+We can look at the slope and aspect as well. 
+By default these are both measured in radians
+A bit more about aspect here https://gisgeography.com/aspect-map/
+and slope here https://pro.arcgis.com/en/pro-app/latest/tool-reference/spatial-analyst/how-slope-works.htm
+
+Together, we can use slope and aspect to draw a "hillShade" which helps us to visualize the topography.
+```{r}
+stor_terrain <- terrain(lidar_2m, c("slope", "aspect"))
+stor_hillShade <- hillShade(stor_terrain$slope, stor_terrain$aspect)
+
+# in this plot I convert slope from radians to degrees
+plot(stor_terrain$slope*180/pi, col = colorRampPalette(c("white", "red"))(64), main = "slope (deg)")
+plot(storglacier, add = TRUE)
+
+plot(stor_hillShade, col = grey((1:64)/64), main = "Hillshade")
+plot(storglacier, add = TRUE)
+
+
+plot(stor_hillShade, col = grey((1:64)/64), main = "Hillshade +Elevation", legend = FALSE)
+plot(lidar_2m, col = magma(13), alpha = 0.4, add =TRUE)
+plot(storglacier, add=TRUE)
+```
+
+
+```{r}
+names(diff) <- "diff"
+names(diff_adj) <- "diff_adj"
+names(lidar_2m) <- "elev"
+
+#This will create a glacier indicator
+blank <- lidar_2m
+values(blank) <- 1
+stor_mask <- mask(blank, storglacier) 
+names(stor_mask) <- "is.glacier"
+
+
+stor_stack <- stack(lidar_2m, diff, diff_adj, stor_terrain, stor_mask)
+
+stor_df <- stor_stack %>% 
+  as.data.frame() %>%
+  as_tibble() %>%
+  mutate(is.glacier = ifelse(is.na(is.glacier), 0, 1))
+
+
+stor_df
+
+summary(stor_df)
+```
+
+
+You can now look at summary stats and plots to see the relationship between diff_adj and elevation, slope, and aspect on and off glacier!!!
+
+
+```{r}
+#EDA
+library(mosaic) 
+library(tigerstats)
+favstats(~slope, data = stor_df)
+favstats(~aspect, data = stor_df)
+favstats(~diff_adj, data = stor_df)
+
+stor_df <- stor_df%>%
+  mutate(is.glacier = as.factor(is.glacier))%>%
+  drop_na()
+
+cor_matrix <- stor_df %>%
+ dplyr::select(elev,diff,diff_adj,slope,aspect) %>%
+  cor()
+
+
+ggplot(stor_df, aes(elev, diff_adj))+
+  geom_point()
+
+
+
+ggplot(stor_df, aes(elev, diff_adj))+
+  geom_point()+
+  geom_smooth()+
+  facet_wrap(~is.glacier)
+
+ggplot(stor_df, aes(aspect, diff_adj, color = is.glacier))+
+  geom_point()
+
+ggplot(stor_df, aes(aspect, diff_adj, color = is.glacier))+
+  geom_point()+
+  geom_smooth(method = "lm")
+
+ggplot(stor_df, aes(is.glacier, diff_adj))+
+  geom_boxplot()
+
+ggplot(stor_df, aes(aspect,diff_adj, color = is.glacier))+
+  geom_violin()
+
+ggplot(stor_df, aes(elev,diff_adj))+
+  geom_violin()
+
+ggplot(data = stor_df, mapping = aes(x = diff_adj, colour = is.glacier)) + 
+  geom_density()
+
+ggplot(data = stor_df, mapping = aes(x = diff_adj)) +
+  geom_histogram(bins = 8) +
+  facet_grid(is.glacier ~ .)
+
+ggplot(data = stor_df, mapping = aes(x = diff_adj, fill= is.glacier))+
+  geom_histogram()
+
+ggplot(stor_df, aes(elev, diff_adj, color = is.glacier))+
+  geom_point()+
+  geom_smooth(method=lm,se=FALSE, color = "black")
+
+# outliers 
+
+mad <- mad(stor_df$diff_adj)
+
+
+
+stor_df %>%
+  mutate(mad = mad(diff_adj))%>%
+  filter(mad > 2 )%>%
+  ggplot(aes(x =elev, y = diff_adj, color = diff_adj))+
+  geom_point()+
+  geom_smooth()
+
+summary(diff_adj)
+ -1.166367 + mad(stor_df$diff_adj)*2
+-1.166367 - mad(stor_df$diff_adj)*2
+
+stor_df %>% 
+  filter(diff_adj >= 2.926436 | diff_adj <= -5.25917) %>%
+  ggplot() +
+  geom_point(aes(x = elev, y = diff_adj)) + 
+  facet_grid(.~is.glacier)
+  
+#raster 
+ stor <- stor_df %>% 
+   filter(diff_adj >= 2.926436 | diff_adj <= -5.25917) %>%
+     dplyr::select(x,y,diff_adj)
+ stor <- rasterFromXYZ(stor)
+ plot(stor)
+ plot(uav_2m_utm, col = magma(64), main = "2022")
+ plot(stor, add = TRUE)
+
+ plot(lidar_2m, col= magma(64), main = "2015" )
+ plot(stor, add = TRUE)
+
+ #cut off 
+ 
+ stor_df %>% 
+  mutate(asp_cut = cut_width(aspect, width= 10)) %>% 
+  group_by(asp_cut) %>%
+  mutate(med = median(diff_adj),
+         upper = med + mad((diff_adj)*2),
+         lower = med - mad((diff_adj)*2)) %>% 
+  filter(diff_adj >= upper | diff_adj <= lower) %>%
+   ggplot(aes(x = asp_cut, y = diff_adj, color = is.glacier))+
+   geom_violin()
+
+```
+
+# playing around with raster
+
+```{r}
+ras_no_outliers <- stor_na %>% 
+  mutate(upper = median(diff_adj) + 2 * mad(diff_adj),
+         lower = median(diff_adj) - 2 * mad(diff_adj)) %>% 
+  filter(diff_adj < upper, diff_adj > lower) %>% 
+     dplyr::select(x,y,diff_adj)
+ras_no_outliers <- rasterFromXYZ(ras_no_outliers)
+
+plot(ras_no_outliers)
+
+ras_outliers <- stor_na %>% 
+  mutate(upper = median(diff_adj) + 2 * mad(diff_adj),
+         lower = median(diff_adj) - 2 * mad(diff_adj)) %>% 
+  filter(diff_adj > upper | diff_adj < lower) %>% 
+     dplyr::select(x,y,diff_adj)
+ras_outliers <- rasterFromXYZ(ras_outliers)
+
+plot(ras_outliers)
+
+plot(ras_no_outliers)
+
+
+stor_na %>% 
+  mutate(upper = median(diff_adj) + 2 * mad(diff_adj),
+         lower = median(diff_adj) - 2 * mad(diff_adj)) %>% 
+  filter(diff_adj <= upper, diff_adj >= lower) %>% 
+  ggplot(aes(x, y, fill = diff_adj)) +
+  geom_raster()
+
+
+
+
+
+```
+
+
+
+
+```{r}
+library(stats)
+
+
+stor_df <- stor_df%>%
+  mutate(is.glacier = as.factor(is.glacier))%>%
+  drop_na()
+
+
+data <- stor_df$diff_adj
+
+median_data <- median(stor_df$diff_adj)
+mad_data <- mad(stor_df$diff_adj)
+
+threshold <- 2
+
+outliers <- stor_df$diff_adj[abs(stor_df$diff_adj - median_data) > threshold * mad_data]
+
+outliers_df <- data.frame(
+  x = outliers,
+  y = stor_df$elev
+)
+
+ggplot()+
+  geom_point(data=outliers_df, aes(x=el, y=diff_adj))
+  
+
+
+#outliers %>%
+  #ggplot( ggplot(aes(x =elev, y = diff_adj, color = diff_adj))+
+  #geom_point()+
+ # geom_smooth())
+  
+```
+
+
+
+ 

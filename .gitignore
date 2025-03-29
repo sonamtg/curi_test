@@ -1,0 +1,6 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+data/stor_z.csv
+data/stor_no_outliers.csv

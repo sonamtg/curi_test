@@ -1,0 +1,219 @@
+---
+title: "Coreg_eda"
+output: html_document
+date: '2023-06-30'
+editor_options: 
+  chunk_output_type: console
+---
+```{r, message = FALSE}
+library(tidyverse)
+library(raster)
+library(terra)
+library(viridis)
+library(dplyr)
+library(RColorBrewer)
+rwb <- colorRampPalette(c("red", "white", "blue"))(50)
+
+stor_no_outliers <- read_csv("data/stor_no_outliers.csv") 
+
+```
+
+#REFER to CV_Rolstad_MedianModel.rmd for model testing and more information
+
+## Set-UP
+```{r}
+#Median
+## Finding the median of the elevation by elevation cuts
+### Note that the centers are needed as we are making a polynomial model
+
+stor_med_elev <- stor_no_outliers %>% 
+  group_by(elev_cut) %>% 
+  #We only used elevation because its R^2 was already within the 90s. Although the other variables were significant, they did not effect the R^2 too much
+  summarise(med_elev_diff = median(elev_diff),
+         count = n()) %>% #counts will play a role in making the model
+  ungroup() %>% 
+     mutate(lower_elev = as.numeric(gsub("\\((.*),.*\\]", "\\1", elev_cut)),
+            upper_elev = as.numeric(gsub(".*,(.*)\\]", "\\1", elev_cut)),
+          med_elev_cut = (lower_elev + upper_elev) / 2,
+          cen_elev_med = med_elev_cut - median(med_elev_cut)) #1475 is the median(med_elev_cut)
+
+sapply(lapply(stor_med_elev, unique), length) #helps identify the different unique levels/values in the data of each col
+
+
+
+#NMAD
+#data frame that is going to be used for modeling 
+stor_slope_maxcurv <- stor_no_outliers %>%
+  filter(max_curv < 5) %>% 
+  # combined the two largest max curve bins and the three largest slope bins to keep the count consistent
+  mutate(max_curve_bin = fct_collapse(max_curve_bin, "(2.36,269]" = c("(2.36,3.26]", "(3.26,269]"))) %>% 
+    mutate(slope_cut = fct_collapse(slope_cut, "(27.8,81.8]" = c("(27.8,33.3]", "(33.3,39.7]", "(39.7,81.8]"))) %>% 
+  group_by(slope_cut, max_curve_bin) %>% 
+  summarise(med_elev_diff = median(elev_diff), 
+         mad_elev_diff = mad(elev_diff),
+         med_slope = median(slope_degrees),
+         med_max = median(max_curv),
+         count = n()) %>% 
+  ungroup() %>% 
+  mutate(cen_max = med_max - median(med_max)) %>% #center of max curvature 
+  mutate(cen_slope = med_slope - median(med_slope)) #center of slope 
+
+
+sapply(lapply(stor_slope_maxcurv, unique), length)
+
+stor_slope_maxcurv %>% 
+  ggplot(aes(x = max_curve_bin, y = slope_cut, size = count)) +
+  geom_point()
+
+```
+
+#Dataset to predict on
+```{r}
+#data frame used to predict nmad and median
+## For the data fram we will predict on, we used their actual variables instead of cuts to help center it
+stor_no_out <- stor_no_outliers %>% 
+  mutate(cen_elev_med = elev - median(stor_med_elev$med_elev_cut),  
+        cen_slope = slope_degrees - median(stor_slope_maxcurv$med_slope),
+        cen_max = max_curv - median(stor_slope_maxcurv$med_max))
+```
+
+
+#Med_Model & predict
+```{r}
+med_model <- lm(med_elev_diff ~ polym(cen_elev_med, degree=3, raw=TRUE), data = stor_med_elev, weights = count) #we choose this model despite having significance in the other ones b/c elev already accounted for 90% of the data (R^2 =90+%)
+summary(med_model)
+stor_med_elev$med_residuals <- residuals(med_model)
+
+
+#predicting for Med for every point
+stor_no_out$pred_med_elev_diff <- predict(med_model, newdata = stor_no_out)
+```
+
+#NMAD_Model & predict
+```{r}
+#models 
+
+model1 <- lm(mad_elev_diff~med_slope + med_max + med_slope:med_max, 
+                    data = stor_slope_maxcurv[stor_slope_maxcurv$med_slope<12,])#uses med slope as a predictor along with med max (we used this when to predict on stor_slope_maxcurv)
+model2 <- lm(mad_elev_diff~med_max, 
+                    data = stor_slope_maxcurv[stor_slope_maxcurv$med_slope>12,]) 
+
+model1_cen <- lm(mad_elev_diff~cen_slope + cen_max + cen_slope:cen_max, 
+                    data = stor_slope_maxcurv[stor_slope_maxcurv$cen_slope<11.3 ,]) # uses center slope (this is what we used to get the z score, we are predicting on stor_no_out)
+model2_cen <- lm(mad_elev_diff~cen_max, 
+                    data = stor_slope_maxcurv[stor_slope_maxcurv$cen_slope>11.3,]) #for center slope our condition is different because med_slope and cen_slope are not the same based on our graphs from the bottom we picked 11.3 by looking at the end of the bin of slope_degree that falls in the area of cen_slope around 0
+
+
+summary(model1)
+summary(model2)
+
+
+# predicting on stor slope max curve
+stor_slope_maxcurv <- stor_slope_maxcurv %>% 
+  mutate(med_max = ifelse(med_max > 3, 3, med_max)) %>%
+  #mutate(med_slope = ifelse(med_slope > 30, 30, med_slope), 
+  mutate(pred_mad = ifelse(med_slope < 12, predict(model1, newdata = .), predict(model2, newdata = .)))
+ 
+stor_slope_maxcurv_cen <- stor_slope_maxcurv %>% #same thing but uses center slope and switched our condition to less than 1 
+  mutate(cen_max = ifelse(cen_max > 3, 3, cen_max)) %>%
+  #mutate(med_slope = ifelse(med_slope > 30, 30, med_slope), 
+  mutate(pred_mad = ifelse(cen_slope < 1, predict(model1, newdata = .), predict(model2, newdata = .))) 
+
+
+
+stor_no_out <- stor_no_out %>% 
+  # leave max_curv as it is as we dont use it in our model
+ # mutate(cen_slope = ifelse(cen_slope > 12, 12, cen_slope))%>%
+  mutate(cen_max = ifelse(cen_max > 3, 3 - median(stor_slope_maxcurv$med_max), cen_max), 
+    pred_mad = ifelse(slope_degrees < 11.3, predict(model1_cen, newdata = .), predict(model2_cen, newdata = .))) #instead of using 12 as our condition we switched it to 11.3 because it was the end of the bin at center slope 0/1
+
+    
+
+
+stor_slope_maxcurv %>% 
+  ggplot(aes(x = cen_slope, y = mad_elev_diff, size = count)) +
+  geom_point() # we are able to see a dip in center slope that helped us change our model approach (from poly to peacwise approach)
+  
+
+
+stor_slope_maxcurv %>% 
+  ggplot(aes(x = med_slope, color = max_curve_bin)) +
+  geom_point(aes(y = mad_elev_diff)) +
+  geom_line(aes(y = pred_mad)) #looking at med slope 
+
+
+stor_slope_maxcurv_cen %>% 
+  ggplot(aes(x = cen_slope, color=max_curve_bin)) +
+  geom_point(aes(y = mad_elev_diff)) +
+  geom_line(aes(y = pred_mad)) # we can see our condition (11.3 for cen slope and 12 for med slope) is working because the line our model is predicting the same nmad for cen_slopes that are really low
+
+
+
+stor_no_out %>% 
+  slice_sample(n = 5000)%>%
+  mutate(mad_elev_diff = mad(elev_diff)) %>% 
+  ggplot(aes(x = cen_slope, color=max_curve_bin)) +
+  geom_point(aes(y = mad_elev_diff)) +
+  geom_line(aes(y = pred_mad))
+
+stor_slope_maxcurv%>%
+  ggplot(aes(x = fct_reorder(slope_cut, med_slope), y = fct_reorder(max_curve_bin, cen_max), fill = mad_elev_diff))+
+  geom_tile() #trying to replicate the same graph as the hugonnet figure 4
+
+
+
+stor_slope_maxcurv %>% 
+  ggplot(aes(x = cen_max, y = pred_mad)) +
+  geom_point()
+
+stor_slope_maxcurv %>% 
+  slice_sample(n = 5000)%>%
+  ggplot(aes(x = pred_mad, y = cen_slope, color = cen_max)) +
+  geom_point()
+
+
+```
+
+#Z-score
+```{r}
+stor_z <- stor_no_out %>% 
+  mutate(z_score = (elev_diff - pred_med_elev_diff) / pred_mad)
+
+stor_z %>% 
+  dplyr::select(z_score, elev_diff, pred_med_elev_diff, pred_mad)
+
+summary(stor_z$z_score)
+sd(stor_z$z_score)
+hist(stor_z$z_score)
+hist(stor_z$pred_mad)
+
+```
+
+
+```{r}
+stor_z %>% 
+   slice_sample(n=5000) %>% 
+  ggplot(aes(x = cen_slope, y = pred_mad)) +
+  geom_point()
+
+stor_z %>% 
+  slice_sample(n=5000) %>% 
+  ggplot(aes(x = max_curv, y = pred_mad)) +
+  geom_point()
+# cen_slope > 30, do the same thing like the 
+
+stor_z %>% 
+  slice_sample(n=5000) %>% 
+  ggplot(aes(x = pred_mad, y = slope_degrees, color = max_curv)) +
+  geom_point()
+  
+
+```
+
+
+ 
+```{r}
+#write_csv(stor_z, "data/stor_z.csv") 
+#write_csv(stor_residuals, "data/stor_residuals.csv")
+```
+

@@ -1,0 +1,534 @@
+---
+title: "Open and View Storglaciaren"
+author: "Laura Boehm Vock"
+date: "2023-05-22"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+#Most of all the plots here come from CV_open_data_EDA.rmd. There are a few that do not. And for those, you only need to run stor_na to run them. If you want to look for that chunk, look for the section title: New Plot...
+
+```{r, message = FALSE}
+library(tidyverse)
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+library(sf)
+library(tibble)
+rwb <- colorRampPalette(c("red", "white", "blue"))(50)
+```
+
+```{r}
+setwd("~/curi_2023_storglaciaren")
+
+# 2015 data
+lidar_2m <- raster("data/Tarfala_Lantmatriet_2015AUG21_2M.tif")
+
+# 2022 data
+uav_2m_utm <- raster("data/storglaciaren_2022_sept_uav_2m_SWEREF99_TM.tif")
+
+# glacier outline in 2022
+storglacier <- shapefile("data/Storglaciaren_Extents_2022/Storglaciaren_Extents_2022SEP.shp")
+
+
+
+lidar_2m
+uav_2m_utm
+storglacier
+
+plot(lidar_2m, col= magma(64), main = "2015" )
+plot(storglacier, add = TRUE)
+
+plot(uav_2m_utm, col = magma(64), main = "2022")
+plot(storglacier, add = TRUE)
+
+
+```
+
+In order to take the difference, we need to be sure the two grids align with each other. 
+This process is called *resampling*. 
+Read about it here: 
+https://desktop.arcgis.com/en/arcmap/latest/extensions/spatial-analyst/performing-analysis/cell-size-and-resampling-in-analysis.htm
+
+
+```{r}
+diff <- resample(uav_2m_utm, lidar_2m) - lidar_2m
+```
+
+```{r, eval = FALSE}
+# See help menu for resample function
+?resample
+```
+
+
+Plot of differences: (Note: try plotting with and without the trim function)
+```{r}
+plot(trim(diff), col = rwb)
+plot(storglacier, add = TRUE)
+```
+
+As you can see above, the differences are around 30m, even off the glacier, where there should be no change. 
+There is some sort of issue with calibration that we will deal with more in depth later.
+
+
+The "mask" function will mask out the glacier. Using cellStats, we then calculate the median difference in elevation in the "off glacier" area. 
+```{r}
+mask(diff, storglacier, inverse = TRUE) %>% cellStats(stat = median)
+```
+
+
+```{r}
+diff_adj <- diff - 31.28
+
+plot(trim(diff_adj), col = rwb, zlim = c(-15, 15))
+plot(storglacier, add = TRUE)
+```
+
+
+We can look at the slope and aspect as well. 
+By default these are both measured in radians
+A bit more about aspect here https://gisgeography.com/aspect-map/
+and slope here https://pro.arcgis.com/en/pro-app/latest/tool-reference/spatial-analyst/how-slope-works.htm
+
+Together, we can use slope and aspect to draw a "hillShade" which helps us to visualize the topography.
+```{r}
+stor_terrain <- terrain(lidar_2m, c("slope", "aspect"))
+stor_hillShade <- hillShade(stor_terrain$slope, stor_terrain$aspect)
+
+# in this plot I convert slope from radians to degrees
+plot(stor_terrain$slope*180/pi, col = colorRampPalette(c("white", "red"))(64), main = "slope (deg)")
+plot(storglacier, add = TRUE)
+
+plot(stor_hillShade, col = grey((1:64)/64), main = "Hillshade")
+plot(storglacier, add = TRUE)
+
+
+plot(stor_hillShade, col = grey((1:64)/64), main = "Hillshade +Elevation", legend = FALSE)
+plot(lidar_2m, col = magma(13), alpha = 0.4, add =TRUE)
+plot(storglacier, add=TRUE)
+```
+
+
+```{r}
+names(diff) <- "diff"
+names(diff_adj) <- "diff_adj"
+names(lidar_2m) <- "elev"
+
+#This will create a glacier indicator
+blank <- lidar_2m
+values(blank) <- 1
+stor_mask <- mask(blank, storglacier) 
+names(stor_mask) <- "is.glacier"
+
+
+stor_stack <- stack(lidar_2m, diff, diff_adj, stor_terrain, stor_mask)
+
+stor_df <- stor_stack %>% 
+  as.data.frame(xy = TRUE) %>%
+  as_tibble() %>%
+  mutate(is.glacier = ifelse(is.na(is.glacier), 0, 1))
+
+
+stor_df
+
+summary(stor_df)
+
+
+stor_na <- stor_df %>% 
+  drop_na() %>% 
+  mutate(is.glacier = as.factor(is.glacier))
+
+stor_na <- stor_df %>% 
+  drop_na() %>% 
+  mutate(is.glacier = as.factor(is.glacier))
+
+stor_df %>% 
+  count(is.na(diff))
+
+stor_df %>% 
+  filter(is.glacier == 1) %>% 
+  count(is.na(diff_adj))
+  
+```
+
+You can now look at summary stats and plots to see the relationship between diff_adj and elevation, slope, and aspect on and off glacier!!!
+
+#Updated Version of the One Above (If you checked out CV_open_data_EDA already, then you can skip everything in this rmd)
+```{r}
+mad(stor_na$diff_adj)*2
+
+summary(stor_na)
+
+stor_na_interval <- stor_na %>% 
+  mutate(elev_cut = cut_width(elev, width = 50, center = 1325)) %>% #cut_width & center should be even
+  group_by(elev_cut, is.glacier) %>% 
+  summarise(n = n()) %>% 
+  print(n = 50)
+
+stor_na_width <- stor_na %>% 
+  mutate(elev_cut = cut_width(elev, width = 50, center = 1325)) %>% #cut_width & center should be even
+  group_by(elev_cut, is.glacier) %>% 
+  mutate(med = median(diff_adj)) %>% 
+  mutate(upper = med + mad(diff_adj)*2) %>% 
+  mutate(lower = med - mad(diff_adj)*2) %>% 
+  filter(diff_adj >= upper | diff_adj <= lower) 
+
+#All (plotting all the points, which are separated by glacier or not)
+stor_na %>% 
+  ggplot() +
+  geom_point(aes(x = x, y = y, color = diff_adj)) +
+  facet_grid(.~is.glacier) +
+  scale_color_viridis_c(option = "magma") +
+  labs(color = "Elevation Difference") +
+  coord_equal()
+
+
+stor_na_outlier <- stor_na %>% 
+  filter(diff_adj >= 2.926436 | diff_adj <= -5.25917) # removing everything that is not an outlier. Again, this is still EDA.
+
+#Straight Med Outlier 
+stor_na_outlier %>% 
+  ggplot() +
+  geom_point(aes(x = x, y = y, color = diff_adj)) +
+  facet_grid(.~is.glacier) +
+  coord_equal()
+
+#Interval Outlier
+stor_na %>% 
+  inner_join(bind_outliers, by = "diff_adj") %>% 
+  ggplot() +
+  geom_point(aes(x = x, y = y, color = diff_adj)) +
+  facet_grid(.~is.glacier) +
+  coord_equal()
+
+#Interval Outlier group_by(elev_cut, is.glacier)
+stor_na_width %>% 
+  ggplot() +
+  geom_point(aes(x = x, y = y, color = diff_adj)) +
+  facet_grid(.~is.glacier) +
+  scale_color_viridis_c(option = "magma") +
+  labs(color = "Elevation Difference") +
+  coord_equal()
+
+stor_width_raster <- rasterFromXYZ(stor_na_width %>% 
+  ungroup() %>% 
+  dplyr::select(x,y,diff_adj))
+
+
+#raster 
+ plot(stor_width_raster)
+ plot(uav_2m_utm, col = magma(64), main = "2022")
+ plot(stor_width_raster, add = TRUE, show.legend = FALSE)
+
+ plot(lidar_2m, col= magma(64), main = "2015" )
+ plot(stor_width_raster, add = TRUE)
+```
+
+
+```{r}
+#Bin Plot
+stor_na %>% 
+  ggplot() +
+  geom_point(aes(x = elev, y = diff_adj)) +
+  facet_grid(.~is.glacier) 
+
+stor_na2 <- stor_na %>% 
+  mutate(elev_cut = cut_width(elev, width = 50, center = 1325, dig.lab = 4)) %>% #center = 1340???
+  group_by(elev_cut, is.glacier) %>% 
+  mutate(med = median(diff_adj)) %>% 
+  mutate(upper = med + mad(diff_adj)*2) %>% 
+  mutate(lower = med - mad(diff_adj)*2)
+
+
+stor_na2 %>% 
+  ggplot() +
+  geom_boxplot(aes(x = elev_cut, y = diff_adj)) +
+  geom_smooth(aes(x = as.numeric(elev_cut), y = upper, color = "mad*2")) + 
+  geom_smooth(aes(x = as.numeric(elev_cut), y = med, color = "med")) +
+  facet_grid(.~is.glacier) +
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 8)
+        )
+
+```
+
+#Update No-outlier plot (3 facets: stable terrain, steep terrain, glacier)
+```{r}
+stor_na4 <- stor_na %>% 
+  mutate(elev_cut = cut_width(elev, width = 50, center = 1325, dig.lab = 4)) %>%
+  mutate(slope_degrees = (as.numeric(slope)*180)/pi) %>% 
+  mutate(is.steep = ifelse(slope_degrees > 30, "steep", "stable")) %>% 
+  group_by(elev_cut, is.glacier, is.steep) %>% 
+  mutate(med = median(diff_adj)) %>% 
+  mutate(uppest = med + mad(diff_adj)*3) %>% 
+  mutate(lowest = med - mad(diff_adj)*3) %>% 
+  filter(diff_adj <= uppest | diff_adj >= lowest) %>% 
+  mutate(med = median(diff_adj)) %>% 
+  mutate(upper = med + mad(diff_adj)*2) %>% 
+  mutate(lower = med - mad(diff_adj)*2)
+
+stor_na4.1 <- stor_na %>% 
+  mutate(elev_cut = cut_width(elev, width = 50, center = 1325, dig.lab = 4)) %>%
+  mutate(slope_degrees = (as.numeric(slope)*180)/pi) %>% 
+  mutate(is.steep = ifelse(slope_degrees > 30, "steep", "stable")) %>% 
+  mutate(is.steep = ifelse(is.glacier == 1, "glacier", is.steep)) %>% 
+  group_by(elev_cut, is.glacier, is.steep) %>% 
+  mutate(med = median(diff_adj)) %>% 
+  mutate(uppest = med + mad(diff_adj)*3) %>% 
+  mutate(lowest = med - mad(diff_adj)*3) %>% 
+  filter(diff_adj <= uppest | diff_adj >= lowest) %>% 
+  mutate(med = median(diff_adj)) %>% 
+  mutate(upper = med + mad(diff_adj)*2) %>% 
+  mutate(lower = med - mad(diff_adj)*2)
+
+
+stor_na3.2 <- stor_na4 %>% 
+  filter(is.glacier == 0) %>% 
+  filter(is.steep == "stable")
+
+stor_na3.3 <- stor_na4 %>% 
+  filter(is.glacier == 0) %>% 
+  filter(is.steep == "steep")
+
+stor_na3.4 <- stor_na4 %>% 
+  filter(is.glacier == 1) 
+  
+stor_na3 %>% 
+  dplyr::select(zscore, is.steep) 
+
+#test
+stor_na_no_med <- stor_na %>% 
+  mutate(elev_cut = cut_width(elev, width = 50, center = 1325, dig.lab = 4)) %>%
+  mutate(slope_degrees = (as.numeric(slope)*180)/pi) %>% 
+  mutate(is.steep = ifelse(slope_degrees > 30, "steep", "stable")) %>% 
+  group_by(elev_cut, is.glacier, is.steep) %>% 
+  mutate(med = median(diff_adj)) %>% 
+  mutate(uppest = med + mad(diff_adj)*3) %>% 
+  mutate(lowest = med - mad(diff_adj)*3) %>% 
+  filter(diff_adj < uppest | diff_adj > lowest) %>% 
+  mutate(med = median(diff_adj)) %>% 
+  mutate(upper = med + mad(diff_adj)*2) %>% 
+  mutate(lower = med - mad(diff_adj)*2)
+
+stor_na4 %>% 
+  ggplot() +
+  geom_boxplot(aes(x = elev_cut, y = diff_adj)) +
+  geom_smooth(aes(x = as.numeric(elev_cut), y = upper, color = "mad*2")) + 
+  geom_smooth(aes(x = as.numeric(elev_cut), y = med, color = "med")) +
+  facet_grid(is.steep~is.glacier) +
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 8)
+        )
+
+stor_na4.1 %>% 
+  ggplot() +
+  geom_boxplot(aes(x = elev_cut, y = diff_adj)) +
+  geom_smooth(aes(x = as.numeric(elev_cut), y = upper, color = "mad*2")) + 
+  geom_smooth(aes(x = as.numeric(elev_cut), y = med, color = "med")) +
+  facet_grid(.~is.steep) +
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 7)
+        ) +
+  labs(y = "Elevation Difference",
+       x = "Elevation Interval")
+
+
+#p1 <- 
+stor_na3.2 %>% 
+  ggplot() +
+  geom_boxplot(aes(x = elev_cut, y = diff_adj)) +
+  geom_smooth(aes(x = as.numeric(elev_cut), y = upper, color = "mad*2")) + 
+  geom_smooth(aes(x = as.numeric(elev_cut), y = med, color = "med")) +
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 8)
+        ) +
+  labs(title = "non-glacier stable terrain")
+
+#test
+stor_na_no_med %>% 
+  ggplot() +
+  geom_boxplot(aes(x = elev_cut, y = diff_adj)) +
+  geom_smooth(aes(x = as.numeric(elev_cut), y = upper, color = "mad*2")) + 
+  geom_smooth(aes(x = as.numeric(elev_cut), y = med, color = "med")) +
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 8)
+        ) +
+  labs(title = "non-glacier stable terrain")
+
+#p2 <- 
+  stor_na3.3 %>% 
+  ggplot() +
+  geom_boxplot(aes(x = elev_cut, y = diff_adj)) +
+  geom_smooth(aes(x = as.numeric(elev_cut), y = upper, color = "mad*2")) + 
+  geom_smooth(aes(x = as.numeric(elev_cut), y = med, color = "med")) +
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 8)
+        ) +
+  labs(title = "non-glacier steep terrain")
+
+#p3 <- 
+ stor_na3.4 %>% 
+  ggplot() +
+  geom_boxplot(aes(x = elev_cut, y = diff_adj)) +
+  geom_smooth(aes(x = as.numeric(elev_cut), y = upper, color = "mad*2")) + 
+  geom_smooth(aes(x = as.numeric(elev_cut), y = med, color = "med")) +
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 8)
+        ) +
+  labs(title = "glacier")
+ 
+ #test_p3 <- 
+ stor_na_no_med %>% 
+  ggplot() +
+  geom_boxplot(aes(x = elev_cut, y = diff_adj)) +
+  geom_smooth(aes(x = as.numeric(elev_cut), y = upper, color = "mad*2")) + 
+  geom_smooth(aes(x = as.numeric(elev_cut), y = med, color = "med")) +
+  theme(axis.text.x = element_text(angle = 45),
+        text = element_text(size = 8)
+        ) +
+  labs(title = "glacier")
+
+library(gridExtra)
+
+
+```
+
+
+
+#New Plots that were not in CV_open_data, but were used in our presentation slides. They are beautiful to look at, but still serve as better eda than the CV_open_data_EDA.
+
+```{r}
+# Setting up the datasets to run the plots below
+stor_no_outliers1 <- stor_na %>% 
+  mutate(elev_cut = cut_width(elev, width = 50, center = 1325, dig.lab = 4)) %>%  mutate(slope_degrees = (as.numeric(slope)*180)/pi) %>% 
+  mutate(is.steep = ifelse(slope_degrees > 30, "steep", "stable")) %>% 
+  mutate(is.steep = ifelse(is.glacier == 1, "glacier", is.steep)) %>% 
+  group_by(elev_cut, is.steep) %>% 
+  mutate(med_with_outliers = median(diff_adj), 
+         mad_with_outliers = mad(diff_adj)) %>% 
+  mutate(uppest = med_with_outliers + mad_with_outliers*3) %>% 
+  mutate(lowest = med_with_outliers - mad_with_outliers*3) %>% 
+  filter(diff_adj <= uppest, diff_adj >= lowest) %>%
+  ungroup() %>%  #### I just added this! Probably
+  mutate(aspect_degrees = (as.numeric(aspect)*180)/pi) %>% 
+  mutate(aspect_cut = cut_width(aspect_degrees, width = 10, center = 25)) %>% 
+  mutate(slope_cut = cut(slope, breaks = c(0, 2.5, 5, 10, 15, 20, 30, 40, 50, 70, 90)))
+
+
+elev_binned_stats <- stor_no_outliers1 %>% 
+  group_by(elev_cut, is.steep) %>%
+  summarize(med = median(diff_adj),
+            mad = mad(diff_adj)) %>%
+  mutate(upper = med + 2*mad, 
+         lower = med - 2*mad)
+
+aspect_binned_stats <- stor_no_outliers1 %>% 
+  group_by(aspect_cut, is.steep) %>%
+  summarize(med = median(diff_adj),
+            mad = mad(diff_adj)) %>%
+  mutate(upper = med + 2*mad, 
+         lower = med - 2*mad)
+
+slope_binned_stats <- stor_no_outliers1 %>% 
+  group_by(slope_cut, is.glacier) %>% 
+  mutate(slope_cut = labels = c("0-2.5", "2.5-5", "5-10", "10-15", "15-20", "20-30", 
+                                    "30-40", "40-50", "50-70", "70-90")) %>% 
+  summarize(med = median(diff_adj),
+            mad = mad(diff_adj)) %>%
+  mutate(upper = med + 2*mad, 
+         lower = med - 2*mad)
+
+
+#Plots
+
+## Elev_cut
+stor_no_outliers1 %>% 
+  ggplot() +
+  geom_boxplot(aes(x = elev_cut, y = diff_adj)) +
+  geom_smooth(data = elev_binned_stats, aes(x = as.numeric(elev_cut), y = upper, color = "mad*2"), se = FALSE) + 
+    geom_smooth(data = elev_binned_stats, aes(x = as.numeric(elev_cut), y = lower, color = "mad*2"), se= FALSE) + 
+  geom_smooth(data = elev_binned_stats, aes(x = as.numeric(elev_cut), y = med, color = "med"), se = FALSE) +
+  facet_grid(.~is.steep) +
+  theme(axis.text.x = element_text(angle = 45, size = 8),
+        axis.text.y = element_text(size = 12),
+        axis.title = element_text(size = 15)
+        ) +
+  labs(y = "Elevation Difference",
+       x = "Elevation Interval")
+
+
+stor_no_outliers1 %>% 
+  ggplot() +
+  geom_boxplot(aes(x = aspect_cut, y = diff_adj)) +
+  geom_smooth(data = aspect_binned_stats, aes(x = as.numeric(aspect_cut), y = upper, color = "mad*2"), se = FALSE) + 
+    geom_smooth(data = aspect_binned_stats, aes(x = as.numeric(aspect_cut), y = lower, color = "mad*2"), se= FALSE) + 
+  geom_smooth(data = aspect_binned_stats, aes(x = as.numeric(aspect_cut), y = med, color = "med"), se = FALSE) +
+  facet_grid(.~is.steep) +
+  theme(axis.text.x = element_text(angle = 45, size = 10),
+        axis.text.y = element_text(size = 12),
+        axis.title = element_text(size = 15)
+        ) +
+  labs(y = "Elevation Difference",
+       x = "Aspect Interval")
+
+
+stor_no_outliers1 %>%
+  ggplot(aes(x,y, fill = diff_adj)) +
+  geom_raster() +  
+  scale_fill_gradient2(low = "#ca0020", mid = "white", high = "#0571b0",
+                       midpoint = 0, limits = c(-15, 15)) + 
+  theme_void() + 
+  theme(plot.background = element_rect(fill = "lightgrey"))+
+  coord_equal() +
+  labs(fill = "Elevation Difference")
+
+
+
+#Interval Outlier group_by(elev_cut, is.glacier)
+stor_na %>% 
+  mutate(elev_cut = cut_width(elev, width = 50, center = 1325, dig.lab = 4)) %>%  
+  mutate(slope_degrees = (as.numeric(slope)*180)/pi) %>% 
+  mutate(is.steep = ifelse(slope_degrees > 30, "steep", "stable")) %>% 
+  mutate(is.steep = ifelse(is.glacier == 1, "glacier", is.steep)) %>% 
+  group_by(elev_cut, is.steep) %>% 
+  mutate(med_with_outliers = median(diff_adj), 
+         mad_with_outliers = mad(diff_adj)) %>% 
+  mutate(uppest = med_with_outliers + mad_with_outliers*3) %>% 
+  mutate(lowest = med_with_outliers - mad_with_outliers*3) %>% 
+  filter(diff_adj >= uppest | diff_adj <= lowest) %>%
+  ggplot() +
+  geom_point(aes(x = x, y = y, color = diff_adj)) +
+  facet_grid(.~is.glacier) +
+  scale_color_viridis_c(option = "magma") +
+  theme(axis.text.x = element_text(size = 10),
+        axis.text.y = element_text(size = 10),
+        axis.title = element_text(size = 15)) +
+  labs(color = "Elevation Difference") +
+  coord_equal()
+
+stor_na %>% 
+  mutate(elev_cut = cut_width(elev, width = 50, center = 1325, dig.lab = 4)) %>%  
+  mutate(slope_degrees = (as.numeric(slope)*180)/pi) %>% 
+  mutate(is.steep = ifelse(slope_degrees > 30, "steep", "stable")) %>% 
+  mutate(is.steep = ifelse(is.glacier == 1, "glacier", is.steep)) %>% 
+  group_by(elev_cut, is.steep) %>% 
+  mutate(med_with_outliers = median(diff_adj), 
+         mad_with_outliers = mad(diff_adj)) %>% 
+  mutate(uppest = med_with_outliers + mad_with_outliers*3) %>% 
+  mutate(lowest = med_with_outliers - mad_with_outliers*3) %>% 
+  filter(diff_adj >= uppest | diff_adj <= lowest) %>% 
+  ggplot(aes(x,y, fill = diff_adj)) +
+  geom_raster() +  
+  scale_fill_gradient2(low = "#ca0020", mid = "white", high = "#0571b0",
+                       midpoint = 0, limits = c(-15, 15)) + 
+  theme_void() + 
+  theme(plot.background = element_rect(fill = "lightgrey"))+
+  coord_equal() +
+  labs(fill = "Elevation Difference")
+```
+
+
+
+#coregistered_interpolation.rmd is the next thing to check 

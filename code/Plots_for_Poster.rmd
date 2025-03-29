@@ -1,0 +1,440 @@
+---
+title: "Coreg_eda"
+output: html_document
+date: '2023-06-30'
+editor_options: 
+  chunk_output_type: console
+---
+```{r, message = FALSE}
+library(tidyverse)
+library(raster)
+library(terra)
+library(viridis)
+library(RColorBrewer)
+library(sf)
+library(ggplot2)
+library(ggplotify)
+library(tmap)
+library(gstat)
+library(sp)
+rwb <- colorRampPalette(c("red", "white", "blue"))(50) # color palette 
+setwd("/home/rstudio/users/gurung2/curi_test")
+stor_cor_glacier <- read_csv("data/stor_cor_glacier.csv")
+stor_slope_maxcurv <- read_csv("data/stor_slope_maxcurv.csv")
+stor_cor_df <- read_csv("data/stor_cor_df.csv")
+storglacier <- shapefile("data/Storglaciaren_Extents_2022/Storglaciaren_Extents_2022SEP.shp")
+nk_cor <- raster("data/nk_corr.tif") 
+stor_void_zoomed <- read_csv("data/stor_void_zoomed.csv")
+stor_interp <- read_csv("data/stor_interp.csv")
+lidar_2m <- raster("data/Tarfala_Lantmatriet_2015AUG21_2M.tif") #2015 data 
+prediction_z1 <-read_csv("data/predictions_z1.csv")
+```
+
+#Coreg
+```{r}
+storglaciersf <- st_as_sf(storglacier, coords = c("x", "y"))
+
+stor_cor_df %>%
+  ggplot() + 
+  geom_raster(aes(x, y, fill = elev_diff)) +  
+  geom_sf(data = storglaciersf, fill = NA, color = "black") + #making the outline
+  scale_fill_gradient2(low = "#ca0020", mid = "white", high = "#0571b0",
+                       midpoint = 0, limits = c(-15, 15)) + 
+  theme_void() + 
+  labs(fill = "Elevation Difference") +
+  theme(plot.background = element_rect(fill = "darkgrey"),
+        legend.text = element_text(size = 12),   # Set the legend text size
+        legend.title = element_text(size = 18), # Set the legend title size 
+        legend.box.background = element_rect(fill = "darkgrey", color = "darkgrey")) +
+  xlim(c(648000, 652000)) +
+  ylim(c(7535000, 7538000)) 
+```
+
+#Interpolation (Hypsometric)
+```{r}
+fill_raster <- stor_cor_glacier %>% 
+  dplyr::select(x, y, filled_elev_diff) %>% 
+  rasterFromXYZ()
+rwb1 <- colorRampPalette(c("red", "white", "blue"))(50)
+
+par(mfrow= c(1,2))
+void_zoomed <- c(648200, 648800, 7536500, 7539000)
+stor_zoomed <- crop(nk_cor, extent(void_zoomed)) %>% trim()
+plot(stor_zoomed, col = rwb1, zlim = c(-15,15), 
+     main = "Before Hypsometric", xaxt = "n", yaxt = "n")
+par(bg = "darkgray")
+interpolated_zoomed<- crop(fill_raster, extent(void_zoomed)) %>% trim()
+plot(interpolated_zoomed,  col = rwb1, zlim = c(-15,15), 
+     main = "After Hypsometric", xaxt = "n", yaxt = "n", legend = FALSE)
+```
+
+#Interpolation (Bilinear)
+```{r}
+#Set-up
+stor_cor_glacier1 <- stor_void_zoomed %>% 
+  drop_na(elev_diff_no_outliers) #create col with the filled void with the real value
+
+
+x <- stor_cor_glacier1$x
+y <- stor_cor_glacier1$y
+z <- stor_cor_glacier1$elev_diff_no_outliers
+
+
+inter <- interp(x, y, z, xo=seq(min(x), max(x), length = 10),
+                yo = seq(min(y), max(y), length = 5))
+
+# interp2xyz(inter,data.frame =TRUE) #it workds well
+
+# Step 2:
+#####IMPORTANT NOTE: Everything below takes a long time to run. Use the stor_interp dataset that has been store. Read it and use the remaining code. IF YOU UPDATE THE stor_interp Dataset, then update it on the write_csv that has been commented out below it.
+
+# new_xo <- unique(stor_void_zoomed$x)
+# new_yo <- unique(stor_void_zoomed$y)
+
+
+# inter_new <- interp(x, y, z, xo = seq(min(new_xo), max(new_xo)), #length = 10),
+#                     yo = seq(min(new_yo), max(new_yo))) #, length = 5)) #it runs, and looks goood. Now use the one that has all of them instead of 50 only.
+
+
+###The code below takes too long too run, so use the stor_interp dataset that has already been in the csv file.
+# inter_new <- interp(x, y, z, xo = new_xo,
+#        yo = new_yo)
+
+# stor_interp <- tibble(interp2xyz(inter_new, data.frame = TRUE)) %>% 
+#   rename(z_elev_diff = z) %>% 
+#   inner_join(stor_void_zoomed) %>% 
+#   mutate(bi_z_score = z_elev_diff -
+#           stor_void_zoomed$pred_med_elev_diff/(stor_void_zoomed$pred_mad))
+
+#write_csv(stor_interp, "data/stor_interp.csv") #rewrite this dataset if there has been any updates
+
+stor_interp %>% 
+  mutate( ifelse()) #ifelse 
+ 
+```
+
+```{r}
+sum(is.na(stor_interp$elev_diff))
+sum(is.na(stor_interp$elev_diff_no_outliers))
+sum(is.na(stor_interp$z_elev_diff)) #This is what we want the differnce in the numbers of NAs 
+
+stor_interp <- stor_interp %>% 
+  mutate(bilinear_filled = ifelse(is.na(elev_diff), z_elev_diff, elev_diff))
+
+#plot
+fill_raster <- stor_interp %>% 
+  dplyr::select(x, y, bilinear_filled) %>% 
+  rasterFromXYZ()
+rwb1 <- colorRampPalette(c("red", "white", "blue"))(50)
+
+par(mfrow= c(1,2))
+void_zoomed <- c(648200, 648800, 7536500, 7539000)
+stor_zoomed <- crop(nk_cor, extent(void_zoomed)) %>% trim()
+plot(stor_zoomed, col = rwb1, zlim = c(-15,15), 
+     main = "Before Bilinear", xaxt = "n", yaxt = "n")
+par(bg = "darkgray")
+interpolated_zoomed <- crop(fill_raster, extent(void_zoomed)) %>% trim()
+plot(interpolated_zoomed,  col = rwb1, zlim = c(-15,15), 
+     main = "After Bilinear", xaxt = "n", yaxt = "n", legend = FALSE)
+
+```
+
+#Krig plot
+```{r}
+#refer to Krig_6th for more info;
+stor_void_na <- stor_void_zoomed%>%
+  filter(is.na(z_score))%>%
+  st_as_sf(coords = c("x","y"))%>%
+  st_set_crs(st_crs(lidar_2m))
+
+stor_void_na <- as.tibble(cbind(stor_void_na, prediction_z1))
+
+stor_void_na <- stor_void_na %>% 
+  mutate(krig_elev_diff = var1.pred *pred_mad + pred_med_elev_diff)
+
+
+stor_rast <- stor_void_na %>% 
+  inner_join(stor_cor_glacier) %>% 
+dplyr::select(x, y, krig_elev_diff) %>% 
+  rasterFromXYZ()
+rwb1 <- colorRampPalette(c("red", "white", "blue"))(50)
+
+plot(stor_rast, col = rwb1, zlim = c(-15,15))
+```
+
+#All Three Interpolation plots
+```{r}
+### Need to run all interpolated plots first
+stor_zoomed <- crop(nk_cor, extent(void_zoomed)) %>% trim()
+par(mfrow= c(1,4))
+plot(stor_zoomed, col = rwb1, zlim = c(-15,15),
+     main = "Before Interpolation", xaxt = "n", yaxt = "n")
+
+#Hypso
+fill_raster <- stor_cor_glacier %>% 
+  dplyr::select(x, y, filled_elev_diff) %>% 
+  rasterFromXYZ()
+
+void_zoomed <- c(648200, 648800, 7536500, 7539000)
+par(bg = "darkgray")
+interpolated_zoomed<- crop(fill_raster, extent(void_zoomed)) %>% trim()
+plot(interpolated_zoomed,  col = rwb1, zlim = c(-15,15), 
+     main = "Hypsometric", xaxt = "n", yaxt = "n", legend = FALSE)
+
+fill_raster <- stor_interp %>% 
+  dplyr::select(x, y, bilinear_filled) %>% 
+  rasterFromXYZ()
+rwb1 <- colorRampPalette(c("red", "white", "blue"))(50)
+
+#Bilinear
+par(bg = "darkgray")
+interpolated_zoomed<- crop(fill_raster, extent(void_zoomed)) %>% trim()
+plot(interpolated_zoomed,  col = rwb1, zlim = c(-15,15), 
+     main = "Bilinear", xaxt = "n", yaxt = "n", legend = FALSE)
+
+#Krig (run Krig plot first. Code chunk above)
+stor_rast <- stor_void_na %>% 
+  inner_join(stor_cor_glacier) %>% 
+dplyr::select(x, y, krig_elev_diff) %>% 
+  rasterFromXYZ()
+rwb1 <- colorRampPalette(c("red", "white", "blue"))(50)
+
+#plot(stor_rast, col = rwb1, zlim = c(-15,15), main = "Kriging", xaxt = "n", yaxt = "n", legend = FALSE)
+
+krig_zoomed<- crop(stor_rast, extent(void_zoomed)) %>% trim()
+plot(krig_zoomed,  col = rwb1, zlim = c(-15,15), 
+     main = "Kriging", xaxt = "n", yaxt = "n", legend = FALSE)
+```
+
+#Heatmap & Z-score standardization
+```{r}
+# huggonet slope and max curvature plot 
+ggplot(data = stor_slope_maxcurv, aes(x = fct_reorder(slope_cut, med_slope), y = fct_reorder(max_curve_bin, cen_max), fill = mad_elev_diff)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "#ca0020", mid = "white", high = "#0571b0",
+                       midpoint = 0, limits = c(-15, 15)) +
+  labs(title = "Heatmap of slope and maximum curvature",
+       x = "Slope bin",
+       y = "Max curvature bin",
+       fill = "NMAD Elevation Difference") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10), 
+    panel.grid.major = element_blank(),  
+    panel.grid.minor = element_blank(),  
+    legend.position = "top",
+    plot.background = element_rect(fill = "darkgrey"),
+        legend.text = element_text(size = 10, angle = 45),   # Set the legend text size
+        legend.title = element_text(size = 18), # Set the legend title size 
+        legend.box.background = element_rect(fill = "darkgrey", color = "darkgrey")# Move legend to the right side of the plot
+  )
+# convert to raster
+stor_z_raster <- rasterFromXYZ(stor_cor_glacier)
+ 
+names(stor_z_raster) #our vairbales 
+
+pred_med <- stor_z_raster[[ "pred_med_elev_diff" ]] #selected detrending 
+pred_mad <- stor_z_raster[["pred_mad"]] # selecting standardization 
+z_score <- stor_z_raster[["z_score"]] # selecting standardization 
+ 
+plot(pred_med)
+plot(pred_mad)
+
+subset_extent3 <- c(650500,650700,7536500 , 7536680)
+par(mfrow = c(1,2), bg = "darkgray")
+plot(z_score, col = rwb, zlim = c(-15,15), xaxt = "n", yaxt = "n") 
+plot(storglacier, add = TRUE)
+plot(extent(subset_extent3), add = TRUE)
+ddemzoom_cropped <- crop(z_score, extent(subset_extent3))%>%
+  trim()
+plot(ddemzoom_cropped, main = "
+     Standardized Elevation diffrence", col = rwb, zlim = c(-15,15), xaxt = "n", yaxt = "n", legend = FALSE)
+```
+
+
+#Med and Mad plots
+```{r}
+#Setting up
+stor_no_outliers1 <- stor_cor_glacier %>% 
+  group_by(elev_cut) %>% 
+  mutate(med_with_outliers = median(elev_diff, na.rm = TRUE), 
+         mad_with_outliers = mad(elev_diff, na.rm = TRUE)) %>% 
+  mutate(uppest = med_with_outliers + mad_with_outliers*3) %>% 
+  mutate(lowest = med_with_outliers - mad_with_outliers*3) %>% 
+  filter(elev_diff <= uppest, elev_diff >= lowest) %>%
+  ungroup()  #### I just added this! Probably
+
+stor_cor_glacier %>% 
+  group_by(elev_cut) %>% 
+  summarise(count = n(),
+            na_count = sum(is.na(elev_diff)))
+
+elev_binned_stats <- stor_no_outliers1 %>% 
+  group_by(elev_cut) %>%
+  summarize(med = median(elev_diff),
+            mad = mad(elev_diff)) %>%
+  mutate(upper = med + 2*mad, 
+         lower = med - 2*mad) %>% 
+  mutate(elev_factor = as.factor(elev_cut))
+
+
+#trouble with the intervals not being in order
+#median of the slopes (fct_reorder by the median)
+slope_binned_stats <- stor_no_outliers1 %>% 
+  group_by(slope_cut)%>% 
+  summarize(med = median(elev_diff),
+            mad = mad(elev_diff)) %>%
+  mutate(upper = med + 2*mad, 
+         lower = med - 2*mad) %>% 
+ mutate(slope_numeric = as.numeric(as.factor(slope_cut)))
+ 
+#trouble with the intervals not being in order
+#median of the slopes (fct_reorder by the median)
+
+
+maxcurve_binned_stats <- stor_no_outliers1 %>% 
+  group_by(max_curve_bin) %>% 
+  summarize(med = median(elev_diff_no_outliers),
+            mad = mad(elev_diff_no_outliers)) %>%
+  mutate(upper = med + 2*mad, 
+         lower = med - 2*mad) %>% 
+  mutate(max_curve_numeric = as.numeric(as.factor(max_curve_bin)))
+
+
+#Elev_diff vs elev
+stor_cor_glacier %>% 
+  ggplot() +
+  geom_boxplot(aes(x = elev_cut, y = elev_diff)) +
+  geom_smooth(data = elev_binned_stats, aes(x = as.numeric(elev_factor), y = upper, color = "mad*2"), se = FALSE) + 
+  geom_smooth(data = elev_binned_stats, aes(x = as.numeric(elev_factor), y = lower, color = "mad*2"), se = FALSE) + 
+  geom_smooth(data = elev_binned_stats, aes(x = as.numeric(elev_factor), y = med, color = "med"), se = FALSE) +
+  theme(axis.text.x = element_text(angle = 45, size = 10),
+        axis.text.y = element_text(size = 12),
+        axis.title = element_text(size = 15)
+        ) +
+  labs(y = "Elevation Difference",
+       x = "Elevation Intervals")
+
+#NMAD vs slope (not sure if correct)
+stor_slope_maxcurv %>% 
+  ggplot() +
+  geom_boxplot(aes(x = fct_reorder(slope_cut, med_slope), y = mad_elev_diff)) +
+  geom_smooth(data = slope_binned_stats, aes(x = as.numeric(slope_cut), y = upper, color = "mad*2"), se = FALSE) + 
+  geom_smooth(data = slope_binned_stats, aes(x = as.numeric(slope_cut), y = lower, color = "mad*2"), se= FALSE) + 
+  geom_smooth(data = slope_binned_stats, aes(x = as.numeric(slope_cut), y = med, color = "med"), se = FALSE) +
+  theme(axis.text.x = element_text(angle = 45, size = 10),
+        axis.text.y = element_text(size = 12),
+        axis.title = element_text(size = 15)
+        ) +
+  labs(y = "NMAD",
+       x = "Slope Intervals")
+
+
+#A different approach
+
+
+
+
+
+
+
+
+#NMAD vs max_curv (not sure if correct)
+stor_slope_maxcurv %>% 
+  ggplot() +
+  geom_boxplot(aes(x = fct_reorder(max_curve_bin, med_max), y = mad_elev_diff)) +
+  geom_smooth(data = slope_binned_stats, aes(x = as.numeric(slope_cut), y = upper, color = "mad*2"), se = FALSE) + 
+  geom_smooth(data = slope_binned_stats, aes(x = as.numeric(slope_cut), y = lower, color = "mad*2"), se= FALSE) + 
+  geom_smooth(data = slope_binned_stats, aes(x = as.numeric(slope_cut), y = med, color = "med"), se = FALSE) +
+  theme(axis.text.x = element_text(angle = 45, size = 10),
+        axis.text.y = element_text(size = 12),
+        axis.title = element_text(size = 15)
+        ) +
+  labs(y = "NMAD",
+       x = "Max Curve Intervals")
+```
+
+
+
+```{r}
+# code for overleaf 
+
+#coreg
+pdf("/home/rstudio/users/gurung2/curi_test/images/coreg.pdf", width = 6.5, height = 4)
+dev.off()
+
+#hypso
+pdf("/home/rstudio/users/gurung2/curi_test/images/hypo.pdf", width = 6.5, height = 4)
+dev.off()
+
+#bilinear
+pdf("/home/rstudio/users/gurung2/curi_test/images/bilinear.pdf", width = 6.5, height = 4)
+dev.off()
+
+#krig
+pdf("/home/rstudio/users/gurung2/curi_test/images/krig.pdf", width = 6.5, height = 4)
+dev.off()
+
+#all interpolation 
+
+pdf("/home/rstudio/users/gurung2/curi_test/images/all_inter.pdf", width = 6.5, height = 4)
+dev.off()
+
+#coreg compare 
+pdf("/home/rstudio/users/gurung2/curi_test/images/coreg_compare.pdf", width = 6.5, height = 4)
+dev.off()
+
+#coreg zoomed in 
+
+pdf("/home/rstudio/users/gurung2/curi_test/images/coreg_zoomed", width = 6.5, height = 4)
+dev.off()
+
+#slope and nmad box plot 
+
+pdf("/home/rstudio/users/gurung2/curi_test/images/slope_nmad.pdf", width = 6.5, height = 4)
+dev.off()
+
+
+
+```
+
+
+
+
+
+```{r}
+par(mfrow= c(1,2))
+
+void_zoomed <- c(648200, 648800, 7536500, 7539000)
+stor_zoomed<- crop(nk_cor, extent(void_zoomed)) %>% trim()
+plot(stor_zoomed, col = magma(10), zlim = c(-20,20), main = "Before Interpolation")
+
+interpolated_zoomed<- crop(fill_raster, extent(void_zoomed)) %>% trim()
+plot(interpolated_zoomed,  col = magma(10), zlim = c(-20,20), main = "After Interpolation")
+
+
+#RWB version
+rwb1 <- colorRampPalette(c("red", "white", "blue"))(20)
+par(mfrow= c(1,2))
+void_zoomed <- c(648200, 648800, 7536500, 7539000)
+stor_zoomed<- crop(nk_cor, extent(void_zoomed)) %>% trim()
+plot(stor_zoomed, col = rwb1, zlim = c(-15,15), main = "Before Interpolation")
+par(bg = "darkgray", add = TRUE)
+interpolated_zoomed<- crop(fill_raster, extent(void_zoomed)) %>% trim()
+plot(interpolated_zoomed,  col = rwb1, zlim = c(-15,15), main = "After Interpolation")
+
+# #section of void 
+# stor_void_zoomed <- stor_cor_glacier %>% 
+#   filter(x >= 648200, x <= 648800 & y >= 7536500, y<= 7539000)
+# 
+# subset_extent3 <- c(648200, 648400, 7536500, 7539000)
+# subset_extent4 <- c(648400,648600, 7536500, 7536800)
+# subset_extent5 <- c(648600, 648800, 7536500, 7539000)
+# par(mfrow= c(1,2))
+# plot(trim(nk_cor), col = rwb1, zlim = c(-15,15))
+# plot(extent(c(subset_extent5)), col = "green", add = TRUE)
+# ddemzoom_cropped <- crop(nk_cor, extent(subset_extent5))%>%
+#   trim()
+# plot(ddemzoom_cropped, main = "Cor",  col = rwb1, zlim = c(-2.5,2.5))
+
+```
