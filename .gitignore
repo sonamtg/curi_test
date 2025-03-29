@@ -4,3 +4,6 @@
 .Ruserdata
 data/stor_z.csv
 data/stor_no_outliers.csv
+data/
+*.tif
+*.csv
